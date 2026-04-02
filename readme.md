@@ -1,0 +1,61 @@
+# TODO
+- [x] music list
+- [x] play music
+- [x] pause music
+- [x] stop music
+- [x] next music
+- [x] prev music
+- [x] volume up
+- [x] volume down
+- [x] random next
+- [x] random next no repeat
+- [x] skip x seconds
+- [x] rewind x seconds
+- [x] .mp3 support
+- [x] .wav support
+- [ ] .ogg support
+- [ ] .flac support
+- [ ] .vgz support
+- [x] random order
+- [x] random (no repeat) order
+    - [x] even if user chooses song manually, still should work
+- [x] default order
+- [ ] loop playlist
+- [ ] save playlist
+- [ ] load playlist
+- [ ] active playlist
+- [x] load tags
+    - [x] table view
+    - [x] artist
+    - [x] album
+    - [x] number
+    - [x] track number
+    - [x] file path
+    - [x] duration
+    - [x] title
+    - [x] playing
+    - [x] number of plays
+- [x] store amount of plays
+- [x] volume slider
+- [x] music slider
+- [x] music info ( draw it somewhere )
+- [x] global hotkeys
+- [ ] calculate replaygain
+- [ ] use replaygain
+- [ ] help window with all hotkeys
+- [ ] config file 
+    - [ ] hotkeys
+    - [ ] table view
+    - [ ] theme
+    - [ ] font size
+- [x] delete file (trash)
+- [x] copy full file path with ctrl+c
+    - [ ] show a notification of what happened
+- [x] refresh music list with F5
+
+# Bugs
+- [ ] when rewinding song until start, NextSong() is called on Update() for some reason 
+- [x] scroll doesn't follow cursor position if it's changed to somewhere far from current items
+- [x] fix scroll filter crashing problems
+- [x] after filtering and cancelling, cursor should point to the file it was on filter
+- [x] refresh is strange, some songs appear and disappear randomly?
