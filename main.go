@@ -222,7 +222,8 @@ func main() {
 	player.HeaderCols = headerCols
 	player.Playlist = musicfiles
 
-	playlistTitle := fmt.Sprintf("Files on %s", path)
+	playlistTitle := fmt.Sprintf("%s", path)
+	title := fmt.Sprintf("music-player - %s", playlistTitle)
 
 	input := cui.NewInput()
 	screenData := &ScreenData{}
@@ -258,11 +259,7 @@ func main() {
 		bounds := remainder
 
 		titleBounds := cui.CutTop(&bounds, FONT.Size+FONT.LineSpacing)
-		DrawTitleShaded(titleBounds, "music-player", rl.Blue, THEME.Text, THEME.Bg)
-
-		titleColor := rl.Green
-		playlistTitleBounds := cui.CutTop(&bounds, FONT.Size+FONT.LineSpacing)
-		DrawTitleShaded(playlistTitleBounds, playlistTitle, titleColor, rl.White, rl.Black)
+		DrawTitleShaded(titleBounds, title, rl.Blue, THEME.Text, THEME.Bg)
 		DrawCurrentSong(&bounds, player)
 
 		if len(player.Playlist) > 0 {
@@ -293,7 +290,7 @@ func main() {
 
 		rl.EndDrawing()
 
-		cui.ScrollInput(input, &scroll, player.Playlist, &player.SelectedSongs, MusicFile_filter_func)
+		cui.ScrollInput(input, bounds, &scroll, player.Playlist, &player.SelectedSongs, MusicFile_filter_func)
 
 		action := input.CheckAction(MUSICLIST_KEYBINDINGS, true)
 		if action == cui.NONE && globalHotkeyAction != cui.NONE {
@@ -369,11 +366,15 @@ func DrawItem(bounds rl.Rectangle, index int, mFile *MusicFile, selected, highli
 		mFile.RelativePath,
 	}
 	width := bounds.Width
+	cui.BeginScissorMode(bounds)
+	rl.DrawRectangleRec(bounds, rl.Red)
 	for i, col := range player.HeaderCols {
 		colWidth := width * col.SizePercent
 		colBounds := bounds //the last col should just get the remaining size
-		if i != len(player.HeaderCols)-1 {
+		if i < len(player.HeaderCols)-2 {
 			colBounds = cui.CutLeft(&bounds, colWidth)
+		} else {
+			continue
 		}
 		color := t.Bg
 		tColor := t.Text
@@ -389,6 +390,7 @@ func DrawItem(bounds rl.Rectangle, index int, mFile *MusicFile, selected, highli
 		cui.DrawBoundedText(FONT, cols[i], colBounds, cui.TEXT_LEFT, tColor, color)
 		rl.EndScissorMode()
 	}
+	rl.EndScissorMode()
 }
 
 func DrawCurrentSong(bounds *rl.Rectangle, player MusicPlayer) {
@@ -823,91 +825,10 @@ func playSongAt(player *MusicPlayer, index int) error {
 	player.CurrentMusic = nextSong
 
 	var music rl.Music
-	// switch nextSong.File.Ext {
-	// case ".flac":
-	// 	decoder, err := OpenFLACDecoder(nextSong.File.Path)
-	// 	if err != nil {
-	// 		return err
-	// 	}
-
-	// 	const chunkFrames = 4096
-	// 	const customStreamPrimeBuffers = 2
-	// 	sampleRate := decoder.SampleRate()
-	// 	channels := decoder.Channels()
-	// 	rl.SetAudioStreamBufferSizeDefault(chunkFrames)
-	// 	stream := rl.LoadAudioStream(sampleRate, 32, channels)
-	// 	pcm := make([]float32, chunkFrames*channels)
-	// 	eof := false
-	// 	var lastError error = nil
-	// label:
-	// 	for i := 0; i < customStreamPrimeBuffers &&
-	// 		rl.IsAudioStreamProcessed(stream) && !eof; i++ {
-	// 		if channels == 0 {
-	// 			lastError = fmt.Errorf("invalid channel count 0")
-	// 			break label
-	// 		}
-	// 		filled := 0
-	// 		var err error
-	// 		for filled < len(pcm) {
-	// 			var n int
-	// 			n, err = decoder.Read(pcm[filled:])
-	// 			if n > 0 {
-	// 				filled += n
-	// 			}
-	// 			if err != nil {
-	// 				if err == io.EOF {
-	// 					break
-	// 				}
-	// 				lastError = err
-	// 				eof = true
-	// 				for i := range pcm {
-	// 					pcm[i] = 0
-	// 				}
-	// 				rl.UpdateAudioStream(stream, pcm)
-	// 				//updateAudioStreamFrames(stream, pcm, chunkFrames)
-	// 				break label
-	// 			}
-	// 			if n == 0 {
-	// 				break
-	// 			}
-	// 		}
-	// 		if filled == 0 && err == io.EOF {
-	// 			break label
-	// 		}
-	// 		if filled%int(channels) != 0 {
-	// 			lastError = fmt.Errorf("misaligned pcm read: %d samples for %d channels", filled, channels)
-	// 			break label
-	// 		}
-	// 		frameCount := filled / int(channels)
-	// 		if frameCount == 0 && filled > 0 {
-	// 			lastError = fmt.Errorf("short pcm read: %d samples for %d channels", filled, channels)
-	// 			break label
-	// 		}
-	// 		for i := filled; i < len(pcm); i++ {
-	// 			pcm[i] = 0
-	// 		}
-	// 		rl.UpdateAudioStream(stream, pcm)
-	// 		if err == io.EOF {
-	// 			break label
-	// 		}
-	// 		//player.fillStreamBuffer()
-	// 	}
-	// 	println(lastError)
-	// 	source := CustomPCMSource{
-	// 		Decoder:    decoder,
-	// 		SampleRate: sampleRate,
-	// 		Channels:   channels,
-	// 		Stream:     stream,
-	// 		PCM:        pcm,
-	// 	}
-	// 	player.CustomMusic = source
-	// 	rl.PlayAudioStream(player.CustomMusic.Stream)
-	// default:
 	music = rl.LoadMusicStream(nextSong.File.Path)
 	player.RaylibMusic = &music
 	rl.PlayMusicStream(*player.RaylibMusic)
 	player.State = PLAYING
-	//}
 	return nil
 }
 
@@ -1249,6 +1170,7 @@ func LoadMusicFiles(path string) ([]*MusicFile, []HeaderCol, error) {
 			if err != nil {
 				fmt.Printf("couldn't read duration for %v: %v\n", file.Path, err.Error())
 			}
+			f.Seek(0, 0)
 			meta, err := tag.ReadFrom(f)
 			if err != nil {
 				//fmt.Printf("couldn't get tags for %s, reason: %s\n", mus.RelativePath, err.Error())

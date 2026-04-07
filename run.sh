@@ -1,2 +1,2 @@
 #!/usr/bin/env bash
-go run main.go duration.go stream_flac.go $@
+CGO_CFLAGS="${CGO_CFLAGS} -DSUPPORT_FILEFORMAT_FLAC" go run *.go $@
