@@ -14,7 +14,7 @@
 - [x] .mp3 support
 - [x] .wav support
 - [ ] .ogg support
-- [ ] .flac support
+- [x] .flac support
 - [ ] .vgz support
 - [x] random order
 - [x] random (no repeat) order

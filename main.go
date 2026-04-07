@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -129,8 +130,82 @@ func DrawDebugInfo(bounds *rl.Rectangle) {
 	cui.DrawText(FONT, textPos, string(text), THEME.Text)
 }
 
-var MusicFile_filter_func = func(filter string, item *MusicFile) bool {
-	return strings.Contains(strings.ToLower(item.RelativePath), strings.ToLower(filter))
+var MusicFile_filter_func = func(query string, items []*MusicFile) ([]*MusicFile, []int) {
+	filtered := make([]*MusicFile, 0)
+	indexes := make([]int, 0)
+	for i, it := range items {
+		if strings.Contains(strings.ToLower(it.RelativePath), strings.ToLower(query)) {
+			filtered = append(filtered, it)
+			indexes = append(indexes, i)
+		}
+	}
+	return filtered, indexes
+}
+
+func FilterAndRankMusicFiles(query string, items []*MusicFile) ([]*MusicFile, []int) {
+	type scored struct {
+		item  *MusicFile
+		score int
+	}
+
+	results := make([]scored, 0, len(items))
+	indexes := make([]int, 0, len(items))
+
+	for i, it := range items {
+		s := fuzzyScore(query, it)
+		if s > 0 {
+			results = append(results, scored{it, s})
+			indexes = append(indexes, i)
+		}
+	}
+
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].score > results[j].score
+	})
+
+	out := make([]*MusicFile, len(results))
+	for i := range results {
+		out[i] = results[i].item
+	}
+
+	return out, indexes
+}
+
+func fuzzyScore(query string, m *MusicFile) int {
+	fields := []string{
+		m.Album,
+		m.Artist,
+		m.Title,
+		m.TrackNumber,
+		m.Fullname,
+		m.RelativePath,
+	}
+
+	score := 0
+	for _, f := range fields {
+		s := strings.ToLower(f)
+		if query == "" {
+			return 0
+		}
+		si, qi := 0, 0
+		seq, maxSeq := 0, 0
+		total := 0
+		for si < len(s) && qi < len(query) {
+			if s[si] == query[qi] {
+				seq++
+				total++
+				if seq > maxSeq {
+					maxSeq = seq
+				}
+				qi++
+			} else {
+				seq = 0
+			}
+			si++
+		}
+		score += maxSeq*10 + total
+	}
+	return score
 }
 
 func formatDuration(seconds float32) string {
@@ -147,6 +222,35 @@ func formatDuration(seconds float32) string {
 }
 
 var playcount = make(map[string]int, 0)
+
+// func main() {
+// 	//rl.SetTraceLogLevel(rl.LogNone)
+// 	rl.SetConfigFlags(rl.FlagWindowResizable)
+// 	rl.InitWindow(800, 600, "music-player")
+// 	defer rl.CloseWindow()
+// 	rl.SetExitKey(rl.KeyNull)
+
+// 	exit := rl.WindowShouldClose()
+// 	for !exit {
+// 		exit = rl.WindowShouldClose()
+// 		rl.BeginDrawing()
+// 		rl.ClearBackground(rl.Black)
+// 		bounds := rl.Rectangle{100, 100, 100, 100}
+// 		rl.DrawRectangleLinesEx(bounds, 1, rl.White)
+// 		box1 := cui.CutBottom(&bounds, 50)
+// 		rl.DrawRectangleRec(box1, rl.Red)
+// 		box2 := cui.CutBottom(&bounds, 50)
+// 		rl.DrawRectangleRec(box2, rl.Blue)
+// 		box3 := cui.CutBottom(&bounds, 50)
+// 		rl.DrawRectangleRec(box3, rl.Green)
+// 		fmt.Printf("box1:%v\n", box1)
+// 		fmt.Printf("box2:%v\n", box2)
+// 		fmt.Printf("box3:%v\n", box3)
+
+// 		rl.EndDrawing()
+
+// 	}
+// }
 
 func main() {
 	rand.Seed(time.Now().UnixNano())
@@ -192,16 +296,16 @@ func main() {
 
 	DIM_SHADER = rl.LoadShader("shaders/dim_shader.vs", "shaders/dim_shader.fs")
 	DIM_FACTORLOC = rl.GetShaderLocation(DIM_SHADER, "dimFactor")
-
+	//fontPath := "roboto.ttf"
 	fontPath, err := cui.GetSystemFont()
 	if err != nil {
 		fmt.Printf("couldn't load system font: %s", err)
 	}
 	const font_resolution = 128
-	const font_size = 18
+	const font_size = 20
 	const font_spacing = 2
 	const line_spacing = 2
-	const codepointSize = 10000
+	const codepointSize = 20000
 	FONT = cui.NewFont(fontPath,
 		font_resolution,
 		font_size,
@@ -627,8 +731,23 @@ func PlayOrPauseSong(player *MusicPlayer, scroll *cui.Scroll[*MusicFile], music 
 		return err
 	}
 	scroll.Dirty = true
-	scroll.Cursor = music.Index
-	cui.CenterCursor(scroll)
+	if scroll.FilterSLE != nil && (scroll.IsFiltering || len(scroll.FilterSLE.Text) > 0) {
+		foundIdx := -1
+		for i, idx := range scroll.FilterIndexes {
+			if idx == music.Index {
+				foundIdx = i
+				break
+			}
+		}
+		if foundIdx > 0 {
+			scroll.FilterCursor = foundIdx
+			cui.CenterCursor(scroll)
+		}
+	} else {
+		scroll.Cursor = music.Index
+		cui.CenterCursor(scroll)
+	}
+
 	return nil
 }
 func UpdatePlayer(player *MusicPlayer, scroll *cui.Scroll[*MusicFile]) error {
@@ -1155,7 +1274,7 @@ func LoadMusicFiles(path string) ([]*MusicFile, []HeaderCol, error) {
 				PlayCount:    0,
 				Album:        "?",
 				Artist:       "?",
-				Title:        "?",
+				Title:        file.DisplayName,
 				TrackNumber:  "?",
 				DurationStr:  "?",
 			}
