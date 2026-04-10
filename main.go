@@ -84,7 +84,7 @@ func listenHotkeys(c chan cui.Action) {
 			case 194: //XF86Launch8
 				c <- CHANGE_PLAYORDER_NORMAL
 			case 191: //XF86Tools
-				c <- cui.CLICK // play/pause
+				c <- PLAY_PAUSE // play/pause
 			case 192: //XF86Launch5
 				c <- NEXT
 			case 193: //XF86Launch6
@@ -498,7 +498,7 @@ func DrawItem(bounds rl.Rectangle, index int, mFile *MusicFile, selected, highli
 }
 
 func DrawCurrentSong(bounds *rl.Rectangle, player MusicPlayer) {
-	volumeAndTimeBounds := cui.CutTop(bounds, FONT.Size+FONT.LineSpacing)
+	volumeAndTimeBounds := cui.CutTop(bounds, FONT.Size+FONT.LineSpacing+4)
 	width := volumeAndTimeBounds.Width / 3
 	timeBounds := cui.CutLeft(&volumeAndTimeBounds, width)
 	volumeBounds := cui.CutLeft(&volumeAndTimeBounds, width)
@@ -515,7 +515,12 @@ func DrawCurrentSong(bounds *rl.Rectangle, player MusicPlayer) {
 	elapsed.Width *= percent
 	cui.DrawBoxEx(timeBounds, cui.BoxTheme{1, rl.White, rl.White, rl.Black})
 	cui.DrawBoxEx(elapsed, cui.BoxTheme{1, rl.White, rl.White, cui.DarkYellow})
-	cui.DrawBoundedText(FONT, "ELAPSED", timeBounds, cui.TEXT_CENTER, rl.White, rl.Black)
+	elapsedText := "no song"
+	if player.State == PLAYING {
+		timePlayed := formatDuration(player.TimePlayed)
+		elapsedText = fmt.Sprintf("%s/%s", timePlayed, player.CurrentMusic.DurationStr)
+	}
+	cui.DrawBoundedText(FONT, elapsedText, timeBounds, cui.TEXT_CENTER, rl.White, rl.Black)
 
 	cui.DrawBoxEx(modeBounds, cui.BoxTheme{1, rl.White, rl.White, rl.Black})
 	text := "NORMAL"
@@ -574,6 +579,7 @@ var player MusicPlayer = MusicPlayer{
 
 const (
 	STOP = iota + cui.LAST_ACTION
+	PLAY_PAUSE
 	NEXT
 	PREVIOUS
 	FORWARD
@@ -593,6 +599,7 @@ const (
 var MUSICLIST_KEYBINDINGS = []cui.KeyBind{
 	{cui.CLICK, rl.KeyEnter},
 	{cui.CANCEL, rl.KeyEscape},
+	{PLAY_PAUSE, cui.MOD_CTRL | rl.KeyEnter},
 	{STOP, cui.MOD_CTRL | rl.KeySpace},
 	{NEXT, cui.MOD_CTRL | rl.KeyRight},
 	{PREVIOUS, cui.MOD_CTRL | rl.KeyLeft},
@@ -611,13 +618,16 @@ var MUSICLIST_KEYBINDINGS = []cui.KeyBind{
 }
 
 func Input(action cui.Action, scroll *cui.Scroll[*MusicFile]) error {
+	if action != cui.NONE {
+		scroll.Dirty = true
+	}
 	switch action {
 	case cui.CLICK:
-		scroll.Dirty = true
-		song := cui.GetHighlightedScrollItem(*scroll, player.Playlist)
-		PlayOrPauseSong(&player, scroll, song)
+		PlaySong(&player, scroll)
 	case cui.CANCEL:
 		//nothing
+	case PLAY_PAUSE:
+		PlayOrPauseSong(&player, scroll)
 	case STOP:
 		StopSong(&player)
 	case NEXT:
@@ -625,12 +635,10 @@ func Input(action cui.Action, scroll *cui.Scroll[*MusicFile]) error {
 		if err != nil {
 			return err
 		}
-		scroll.Dirty = true
 		scroll.Cursor = index
 		cui.CenterCursor(scroll)
 	case PREVIOUS:
 		index := PrevSong(&player, scroll)
-		scroll.Dirty = true
 		scroll.Cursor = index
 		cui.CenterCursor(scroll)
 	case FORWARD:
@@ -639,12 +647,10 @@ func Input(action cui.Action, scroll *cui.Scroll[*MusicFile]) error {
 		RewindSong(&player)
 	case NEXT_RANDOM_NO_REPEAT:
 		index := NextRandomNoRepeatSong(&player)
-		scroll.Dirty = true
 		scroll.Cursor = index
 		cui.CenterCursor(scroll)
 	case NEXT_RANDOM:
 		index := NextRandomSong(&player)
-		scroll.Dirty = true
 		scroll.Cursor = index
 		cui.CenterCursor(scroll)
 	case VOLUME_UP:
@@ -706,11 +712,37 @@ func Pop[T any](arr *[]T) T {
 	return x
 }
 
-func PlayOrPauseSong(player *MusicPlayer, scroll *cui.Scroll[*MusicFile], music *MusicFile) error {
+func PlaySong(player *MusicPlayer, scroll *cui.Scroll[*MusicFile]) error {
+	song := cui.GetHighlightedScrollItem(*scroll, player.Playlist)
+	err := playSongAt(player, song.Index)
+	if err != nil {
+		return err
+	}
+	if scroll.FilterSLE != nil && (scroll.IsFiltering || len(scroll.FilterSLE.Text) > 0) {
+		foundIdx := -1
+		for i, idx := range scroll.FilterIndexes {
+			if idx == song.Index {
+				foundIdx = i
+				break
+			}
+		}
+		if foundIdx > 0 {
+			scroll.FilterCursor = foundIdx
+			cui.CenterCursor(scroll)
+		}
+	} else {
+		scroll.Cursor = song.Index
+		cui.CenterCursor(scroll)
+	}
+	return nil
+}
+func PlayOrPauseSong(player *MusicPlayer, scroll *cui.Scroll[*MusicFile]) error {
 	if len(player.Playlist) == 0 {
 		return nil
 	}
-	if player.CurrentMusic != nil && player.CurrentMusic.Index == music.Index {
+	if player.CurrentMusic == nil {
+		PlaySong(player, scroll)
+	} else {
 		switch player.State {
 		case PLAYING:
 			if player.RaylibMusic != nil {
@@ -726,28 +758,6 @@ func PlayOrPauseSong(player *MusicPlayer, scroll *cui.Scroll[*MusicFile], music 
 			return nil
 		}
 	}
-	err := playSongAt(player, music.Index)
-	if err != nil {
-		return err
-	}
-	scroll.Dirty = true
-	if scroll.FilterSLE != nil && (scroll.IsFiltering || len(scroll.FilterSLE.Text) > 0) {
-		foundIdx := -1
-		for i, idx := range scroll.FilterIndexes {
-			if idx == music.Index {
-				foundIdx = i
-				break
-			}
-		}
-		if foundIdx > 0 {
-			scroll.FilterCursor = foundIdx
-			cui.CenterCursor(scroll)
-		}
-	} else {
-		scroll.Cursor = music.Index
-		cui.CenterCursor(scroll)
-	}
-
 	return nil
 }
 func UpdatePlayer(player *MusicPlayer, scroll *cui.Scroll[*MusicFile]) error {
@@ -756,12 +766,13 @@ func UpdatePlayer(player *MusicPlayer, scroll *cui.Scroll[*MusicFile]) error {
 		player.TimePlayed = rl.GetMusicTimePlayed(*player.RaylibMusic)
 		player.TimeLength = rl.GetMusicTimeLength(*player.RaylibMusic)
 		if player.TimePlayed >= player.TimeLength-0.05 {
-			index, err := NextSong(player)
+			nextIndex, err := NextSong(player)
 			if err != nil {
 				return err
 			}
+			scroll.Cursor = nextIndex
+			cui.CenterCursor(scroll)
 			scroll.Dirty = true
-			scroll.Cursor = index
 			playcount[player.CurrentMusic.RelativePath] += 1
 			player.CurrentMusic.PlayCount += 1
 		}
@@ -908,7 +919,6 @@ func DeleteSongs(player *MusicPlayer, scroll *cui.Scroll[*MusicFile]) {
 	}
 	player.HeaderCols = headerCols
 	player.Playlist = musicfiles
-	scroll.Dirty = true
 	scroll.Cursor = cui.Clamp(scroll.Cursor, 0, len(player.Playlist)-1)
 	scroll.FilterCursor = cui.Clamp(scroll.FilterCursor, 0, len(scroll.FilterItems)-1)
 }
@@ -919,7 +929,6 @@ func RefreshPlaylist(player *MusicPlayer, scroll *cui.Scroll[*MusicFile]) {
 	}
 	player.HeaderCols = headerCols
 	player.Playlist = musicfiles
-	scroll.Dirty = true
 	//scroll.Cursor = 0 //TODO: cursor should behave better
 }
 
