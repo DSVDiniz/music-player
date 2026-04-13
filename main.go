@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -142,72 +141,6 @@ var MusicFile_filter_func = func(query string, items []*MusicFile) ([]*MusicFile
 	return filtered, indexes
 }
 
-func FilterAndRankMusicFiles(query string, items []*MusicFile) ([]*MusicFile, []int) {
-	type scored struct {
-		item  *MusicFile
-		score int
-	}
-
-	results := make([]scored, 0, len(items))
-	indexes := make([]int, 0, len(items))
-
-	for i, it := range items {
-		s := fuzzyScore(query, it)
-		if s > 0 {
-			results = append(results, scored{it, s})
-			indexes = append(indexes, i)
-		}
-	}
-
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].score > results[j].score
-	})
-
-	out := make([]*MusicFile, len(results))
-	for i := range results {
-		out[i] = results[i].item
-	}
-
-	return out, indexes
-}
-
-func fuzzyScore(query string, m *MusicFile) int {
-	fields := []string{
-		m.Album,
-		m.Artist,
-		m.Title,
-		m.TrackNumber,
-		m.Fullname,
-		m.RelativePath,
-	}
-
-	score := 0
-	for _, f := range fields {
-		s := strings.ToLower(f)
-		if query == "" {
-			return 0
-		}
-		si, qi := 0, 0
-		seq, maxSeq := 0, 0
-		total := 0
-		for si < len(s) && qi < len(query) {
-			if s[si] == query[qi] {
-				seq++
-				total++
-				if seq > maxSeq {
-					maxSeq = seq
-				}
-				qi++
-			} else {
-				seq = 0
-			}
-			si++
-		}
-		score += maxSeq*10 + total
-	}
-	return score
-}
-
 func formatDuration(seconds float32) string {
 	total := int(seconds + 0.5)
 
@@ -222,35 +155,6 @@ func formatDuration(seconds float32) string {
 }
 
 var playcount = make(map[string]int, 0)
-
-// func main() {
-// 	//rl.SetTraceLogLevel(rl.LogNone)
-// 	rl.SetConfigFlags(rl.FlagWindowResizable)
-// 	rl.InitWindow(800, 600, "music-player")
-// 	defer rl.CloseWindow()
-// 	rl.SetExitKey(rl.KeyNull)
-
-// 	exit := rl.WindowShouldClose()
-// 	for !exit {
-// 		exit = rl.WindowShouldClose()
-// 		rl.BeginDrawing()
-// 		rl.ClearBackground(rl.Black)
-// 		bounds := rl.Rectangle{100, 100, 100, 100}
-// 		rl.DrawRectangleLinesEx(bounds, 1, rl.White)
-// 		box1 := cui.CutBottom(&bounds, 50)
-// 		rl.DrawRectangleRec(box1, rl.Red)
-// 		box2 := cui.CutBottom(&bounds, 50)
-// 		rl.DrawRectangleRec(box2, rl.Blue)
-// 		box3 := cui.CutBottom(&bounds, 50)
-// 		rl.DrawRectangleRec(box3, rl.Green)
-// 		fmt.Printf("box1:%v\n", box1)
-// 		fmt.Printf("box2:%v\n", box2)
-// 		fmt.Printf("box3:%v\n", box3)
-
-// 		rl.EndDrawing()
-
-// 	}
-// }
 
 func main() {
 	rand.Seed(time.Now().UnixNano())
@@ -443,12 +347,9 @@ type HeaderCol struct {
 func DrawScrollHeader(bounds rl.Rectangle) {
 	t := cui.BoxTheme{1, rl.White, rl.White, rl.Gray}
 	width := bounds.Width
-	for i, col := range player.HeaderCols {
+	for _, col := range player.HeaderCols {
 		colWidth := width * col.SizePercent
-		colBounds := bounds //the last col should just get the remaining size
-		if i != len(player.HeaderCols)-1 {
-			colBounds = cui.CutLeft(&bounds, colWidth)
-		}
+		colBounds := cui.CutLeft(&bounds, colWidth)
 		cui.DrawBoxEx(colBounds, t)
 		cui.BeginScissorMode(colBounds)
 		cui.DrawBoundedText(FONT, col.Name, colBounds, cui.TEXT_LEFT, t.Text, t.Bg)
@@ -474,12 +375,7 @@ func DrawItem(bounds rl.Rectangle, index int, mFile *MusicFile, selected, highli
 	rl.DrawRectangleRec(bounds, rl.Red)
 	for i, col := range player.HeaderCols {
 		colWidth := width * col.SizePercent
-		colBounds := bounds //the last col should just get the remaining size
-		if i < len(player.HeaderCols)-2 {
-			colBounds = cui.CutLeft(&bounds, colWidth)
-		} else {
-			continue
-		}
+		colBounds := cui.CutLeft(&bounds, colWidth)
 		color := t.Bg
 		tColor := t.Text
 		if i == 0 {
@@ -498,7 +394,7 @@ func DrawItem(bounds rl.Rectangle, index int, mFile *MusicFile, selected, highli
 }
 
 func DrawCurrentSong(bounds *rl.Rectangle, player MusicPlayer) {
-	volumeAndTimeBounds := cui.CutTop(bounds, FONT.Size+FONT.LineSpacing+4)
+	volumeAndTimeBounds := cui.CutTop(bounds, FONT.Size+4)
 	width := volumeAndTimeBounds.Width / 3
 	timeBounds := cui.CutLeft(&volumeAndTimeBounds, width)
 	volumeBounds := cui.CutLeft(&volumeAndTimeBounds, width)
@@ -718,7 +614,7 @@ func PlaySong(player *MusicPlayer, scroll *cui.Scroll[*MusicFile]) error {
 	if err != nil {
 		return err
 	}
-	if scroll.FilterSLE != nil && (scroll.IsFiltering || len(scroll.FilterSLE.Text) > 0) {
+	if cui.IsFilterActive(*scroll) {
 		foundIdx := -1
 		for i, idx := range scroll.FilterIndexes {
 			if idx == song.Index {
@@ -904,7 +800,7 @@ func DeleteSongs(player *MusicPlayer, scroll *cui.Scroll[*MusicFile]) {
 	//todo: delete multiple songs, depending on what's selected
 	//needs a confirmation modal...maybe
 	song := cui.GetHighlightedScrollItem(*scroll, player.Playlist)
-	if song.File.Path == player.CurrentMusic.File.Path {
+	if player.CurrentMusic != nil && player.CurrentMusic.File.Path == song.File.Path {
 		StopSong(player)
 	}
 	err := DeleteFileTrashbin(song.File.Path)
@@ -912,7 +808,9 @@ func DeleteSongs(player *MusicPlayer, scroll *cui.Scroll[*MusicFile]) {
 		fmt.Printf("%v\n", err.Error())
 	}
 	player.Playlist = slices.Delete(player.Playlist, scroll.Cursor, scroll.Cursor+1)
-	scroll.FilterItems = slices.Delete(scroll.FilterItems, scroll.Cursor, scroll.Cursor+1)
+	if len(scroll.FilterItems) != 0 {
+		scroll.FilterItems = slices.Delete(scroll.FilterItems, scroll.Cursor, scroll.Cursor+1)
+	}
 	musicfiles, headerCols, err := LoadMusicFiles(player.PlaylistPath)
 	if err != nil {
 		panic(err)
@@ -920,7 +818,9 @@ func DeleteSongs(player *MusicPlayer, scroll *cui.Scroll[*MusicFile]) {
 	player.HeaderCols = headerCols
 	player.Playlist = musicfiles
 	scroll.Cursor = cui.Clamp(scroll.Cursor, 0, len(player.Playlist)-1)
-	scroll.FilterCursor = cui.Clamp(scroll.FilterCursor, 0, len(scroll.FilterItems)-1)
+	if len(scroll.FilterItems) != 0 {
+		scroll.FilterCursor = cui.Clamp(scroll.FilterCursor, 0, len(scroll.FilterItems)-1)
+	}
 }
 func RefreshPlaylist(player *MusicPlayer, scroll *cui.Scroll[*MusicFile]) {
 	musicfiles, headerCols, err := LoadMusicFiles(player.PlaylistPath)
