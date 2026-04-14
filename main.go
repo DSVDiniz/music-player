@@ -23,7 +23,7 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-func listenHotkeys(c chan cui.Action) {
+func ListenHotkeys(c chan cui.Action) {
 	X, err := xgb.NewConn()
 	if err != nil {
 		log.Fatal(err)
@@ -141,7 +141,7 @@ var MusicFile_filter_func = func(query string, items []*MusicFile) ([]*MusicFile
 	return filtered, indexes
 }
 
-func formatDuration(seconds float32) string {
+func FormatDuration(seconds float32) string {
 	total := int(seconds + 0.5)
 
 	h := total / 3600
@@ -154,38 +154,121 @@ func formatDuration(seconds float32) string {
 	return fmt.Sprintf("%02d:%02d", m, s)
 }
 
-var playcount = make(map[string]int, 0)
+var PLAYER MusicPlayer
+
+type MusicPlayer struct {
+	CurrentMusic *MusicFile
+	RaylibMusic  *rl.Music
+	//CustomMusic  CustomPCMSource
+	State      MusicState
+	Volume     float32
+	TimePlayed float32
+	TimeLength float32
+
+	PlaylistPath    string
+	HeaderCols      []HeaderCol
+	Playlist        []*MusicFile
+	SelectedSongs   map[int]struct{}
+	PlayedSongs     []int
+	PlayOrder       PlayOrder
+	RemainingUnique []int
+	Playcount       map[string]int
+}
 
 func main() {
 	rand.Seed(time.Now().UnixNano())
 
 	hotkeyChan := make(chan cui.Action)
 
-	go listenHotkeys(hotkeyChan)
+	go ListenHotkeys(hotkeyChan)
 
 	var p string
-	flag.StringVar(&p, "path", "~/Music", "the folder where all unorganized music files are (recursive)")
+	flag.StringVar(&p, "path", "", "the folder where all unorganized music files are (recursive)")
 	flag.Parse()
-	if len(p) == 0 {
-		panic("no path was specified, use --help")
+	var path string
+	var err error
+	if len(p) > 0 {
+		path, err = ExpandHome(p)
+		if err != nil {
+			panic(err)
+		}
 	}
-	path, err := ExpandHome(p)
-	if err != nil {
-		panic(err)
-	}
-
+	gob.Register(MusicPlayerNonPointer{})
 	gob.Register(MusicFile{})
+	gob.Register(rl.Music{})
+	gob.Register(HeaderCol{})
 
-	playcount, err = loadState()
+	state, err := LoadState()
 	if err != nil {
-		fmt.Printf("%v\n", err.Error())
+		fmt.Printf("%v : laoding default player options\n", err.Error())
 	}
-	if playcount == nil {
-		playcount = make(map[string]int, 0)
+
+	if state == nil {
+		println("couldn't find saved state, using default values")
+		PLAYER = MusicPlayer{
+			Volume:        1,
+			PlayedSongs:   make([]int, 0),
+			SelectedSongs: make(map[int]struct{}),
+			PlayOrder:     PLAYORDER_RANDOM_NO_REPEAT,
+		}
+		if len(path) == 0 {
+			panic("no path was specified and no saved data was found, use --help")
+		}
+		musicfiles, headerCols, err := LoadMusicFiles(path)
+		if err != nil {
+			panic(err)
+		}
+		PLAYER.PlaylistPath = path
+		PLAYER.HeaderCols = headerCols
+		PLAYER.Playlist = musicfiles
+	} else {
+		println("loading saved state")
+		if len(path) == 0 && len(state.PlaylistPath) == 0 {
+			panic("no path was specified and saved data had no playlist path, use --help and at least add a path")
+		}
+		if len(path) > 0 {
+			fmt.Printf("overriding previous saved path\n")
+			state.PlaylistPath = path
+		}
+		PLAYER.Playcount = state.Playcount
+		musicfiles, headerCols, err := LoadMusicFiles(state.PlaylistPath)
+		if err != nil {
+			panic(err)
+		}
+		var currentMusic *MusicFile
+		if len(musicfiles) > 0 {
+			for _, m := range musicfiles {
+				if m.File.Path == state.CurrentMusicPath {
+					currentMusic = m
+					break
+				}
+			}
+		}
+		PLAYER = MusicPlayer{
+			CurrentMusic: currentMusic,
+			RaylibMusic:  nil,
+			State:        state.State,
+			Volume:       state.Volume,
+			TimePlayed:   state.TimePlayed,
+			TimeLength:   state.TimeLength,
+
+			PlaylistPath: state.PlaylistPath,
+			HeaderCols:   state.HeaderCols,
+			//Playlist:        state.Playlist,
+			PlayedSongs:   make([]int, 0),         //state.SelectedSongs,
+			SelectedSongs: make(map[int]struct{}), //state.PlayedSongs,
+			PlayOrder:     state.PlayOrder,
+			//RemainingUnique: state.RemainingUnique,
+		}
+
+		if len(PLAYER.HeaderCols) == 0 {
+			PLAYER.HeaderCols = headerCols
+		}
+		PLAYER.Playlist = musicfiles
 	}
 
 	go cui.MonitorMemory()
-	//rl.SetTraceLogLevel(rl.LogNone)
+	rl.SetTraceLogLevel(rl.LogNone)
 	rl.SetConfigFlags(rl.FlagWindowResizable)
 	rl.InitWindow(800, 600, "music-player")
 	defer rl.CloseWindow()
@@ -222,13 +305,6 @@ func main() {
 		ItemHeight: FONT.Size,
 		FilterSLE:  cui.NewSingleLineEditor(),
 	}
-	player.PlaylistPath = path
-	musicfiles, headerCols, err := LoadMusicFiles(player.PlaylistPath)
-	if err != nil {
-		panic(err)
-	}
-	player.HeaderCols = headerCols
-	player.Playlist = musicfiles
 
 	playlistTitle := fmt.Sprintf("%s", path)
 	title := fmt.Sprintf("music-player - %s", playlistTitle)
@@ -251,7 +327,7 @@ func main() {
 		screen.Width = float32(rl.GetScreenWidth())
 		screen.Height = float32(rl.GetScreenHeight())
 		UpdateScreenResize(screenData, screen.Width, screen.Height)
-		err := UpdatePlayer(&player, &scroll)
+		err := UpdatePlayer(&PLAYER, &scroll)
 		if err != nil {
 			println(err)
 		}
@@ -268,10 +344,10 @@ func main() {
 
 		titleBounds := cui.CutTop(&bounds, FONT.Size+FONT.LineSpacing)
 		DrawTitleShaded(titleBounds, title, rl.Blue, THEME.Text, THEME.Bg)
-		DrawCurrentSong(&bounds, player)
+		DrawCurrentSong(&bounds, PLAYER)
 
-		if len(player.Playlist) > 0 {
-			var currentFile = cui.GetHighlightedScrollItem(scroll, player.Playlist)
+		if len(PLAYER.Playlist) > 0 {
+			var currentFile = cui.GetHighlightedScrollItem(scroll, PLAYER.Playlist)
 			fpath := ""
 			if currentFile != nil {
 				fpath = currentFile.File.Path
@@ -287,7 +363,7 @@ func main() {
 			DrawFileInfo(currentFile, string(filePath), lines, fileInfoBounds)
 			headerBounds := cui.CutTop(&bounds, FONT.Size+FONT.LineSpacing)
 			DrawScrollHeader(headerBounds)
-			cui.DrawScroll(FONT, bounds, &scroll, player.Playlist, player.SelectedSongs, rl.Red, THEME, dt,
+			cui.DrawScroll(FONT, bounds, &scroll, PLAYER.Playlist, PLAYER.SelectedSongs, rl.Red, THEME, dt,
 				func(itemBounds rl.Rectangle, index int, mFile *MusicFile, selected, highlighted bool) {
 					DrawItem(itemBounds, index, mFile, selected, highlighted)
 				},
@@ -298,7 +374,7 @@ func main() {
 
 		rl.EndDrawing()
 
-		cui.ScrollInput(input, bounds, &scroll, player.Playlist, &player.SelectedSongs, MusicFile_filter_func)
+		cui.ScrollInput(input, bounds, &scroll, PLAYER.Playlist, &PLAYER.SelectedSongs, MusicFile_filter_func)
 
 		action := input.CheckAction(MUSICLIST_KEYBINDINGS, true)
 		if action == cui.NONE && globalHotkeyAction != cui.NONE {
@@ -309,11 +385,11 @@ func main() {
 			println(err)
 		}
 	}
-	if player.RaylibMusic != nil {
-		rl.UnloadMusicStream(*player.RaylibMusic)
+	if PLAYER.RaylibMusic != nil {
+		rl.UnloadMusicStream(*PLAYER.RaylibMusic)
 	}
 	rl.CloseAudioDevice()
-	err = saveState(playcount)
+	err = saveState(PLAYER)
 	if err != nil {
 		panic(err)
 	}
@@ -347,7 +423,7 @@ type HeaderCol struct {
 func DrawScrollHeader(bounds rl.Rectangle) {
 	t := cui.BoxTheme{1, rl.White, rl.White, rl.Gray}
 	width := bounds.Width
-	for _, col := range player.HeaderCols {
+	for _, col := range PLAYER.HeaderCols {
 		colWidth := width * col.SizePercent
 		colBounds := cui.CutLeft(&bounds, colWidth)
 		cui.DrawBoxEx(colBounds, t)
@@ -358,7 +434,7 @@ func DrawScrollHeader(bounds rl.Rectangle) {
 }
 
 func DrawItem(bounds rl.Rectangle, index int, mFile *MusicFile, selected, highlighted bool) {
-	isPlaying := player.CurrentMusic != nil && index == player.CurrentMusic.Index
+	isPlaying := PLAYER.CurrentMusic != nil && index == PLAYER.CurrentMusic.Index
 	t := DecideFileColor(selected, highlighted, mFile)
 	cols := []string{
 		fmt.Sprintf("%d", mFile.Index),
@@ -373,7 +449,10 @@ func DrawItem(bounds rl.Rectangle, index int, mFile *MusicFile, selected, highli
 	width := bounds.Width
 	cui.BeginScissorMode(bounds)
 	rl.DrawRectangleRec(bounds, rl.Red)
-	for i, col := range player.HeaderCols {
+	for i, col := range PLAYER.HeaderCols {
+		if i == 3 {
+			continue
+		}
 		colWidth := width * col.SizePercent
 		colBounds := cui.CutLeft(&bounds, colWidth)
 		color := t.Bg
@@ -394,6 +473,9 @@ func DrawItem(bounds rl.Rectangle, index int, mFile *MusicFile, selected, highli
 }
 
 func DrawCurrentSong(bounds *rl.Rectangle, player MusicPlayer) {
+	if player.CurrentMusic == nil {
+		return
+	}
 	volumeAndTimeBounds := cui.CutTop(bounds, FONT.Size+4)
 	width := volumeAndTimeBounds.Width / 3
 	timeBounds := cui.CutLeft(&volumeAndTimeBounds, width)
@@ -413,7 +495,7 @@ func DrawCurrentSong(bounds *rl.Rectangle, player MusicPlayer) {
 	cui.DrawBoxEx(elapsed, cui.BoxTheme{1, rl.White, rl.White, cui.DarkYellow})
 	elapsedText := "no song"
 	if player.State == PLAYING {
-		timePlayed := formatDuration(player.TimePlayed)
+		timePlayed := FormatDuration(player.TimePlayed)
 		elapsedText = fmt.Sprintf("%s/%s", timePlayed, player.CurrentMusic.DurationStr)
 	}
 	cui.DrawBoundedText(FONT, elapsedText, timeBounds, cui.TEXT_CENTER, rl.White, rl.Black)
@@ -466,13 +548,6 @@ const (
 	PAUSED
 )
 
-var player MusicPlayer = MusicPlayer{
-	Volume:        1,
-	PlayedSongs:   make([]int, 0),
-	SelectedSongs: make(map[int]struct{}),
-	PlayOrder:     PLAYORDER_RANDOM_NO_REPEAT,
-}
-
 const (
 	STOP = iota + cui.LAST_ACTION
 	PLAY_PAUSE
@@ -519,52 +594,52 @@ func Input(action cui.Action, scroll *cui.Scroll[*MusicFile]) error {
 	}
 	switch action {
 	case cui.CLICK:
-		PlaySong(&player, scroll)
+		PlaySong(&PLAYER, scroll)
 	case cui.CANCEL:
 		//nothing
 	case PLAY_PAUSE:
-		PlayOrPauseSong(&player, scroll)
+		PlayOrPauseSong(&PLAYER, scroll)
 	case STOP:
-		StopSong(&player)
+		StopSong(&PLAYER)
 	case NEXT:
-		index, err := NextSong(&player)
+		index, err := NextSong(&PLAYER)
 		if err != nil {
 			return err
 		}
 		scroll.Cursor = index
 		cui.CenterCursor(scroll)
 	case PREVIOUS:
-		index := PrevSong(&player, scroll)
+		index := PrevSong(&PLAYER, scroll)
 		scroll.Cursor = index
 		cui.CenterCursor(scroll)
 	case FORWARD:
-		ForwardSong(&player)
+		ForwardSong(&PLAYER)
 	case REWIND:
-		RewindSong(&player)
+		RewindSong(&PLAYER)
 	case NEXT_RANDOM_NO_REPEAT:
-		index := NextRandomNoRepeatSong(&player)
+		index := NextRandomNoRepeatSong(&PLAYER)
 		scroll.Cursor = index
 		cui.CenterCursor(scroll)
 	case NEXT_RANDOM:
-		index := NextRandomSong(&player)
+		index := NextRandomSong(&PLAYER)
 		scroll.Cursor = index
 		cui.CenterCursor(scroll)
 	case VOLUME_UP:
-		VolumeUp(&player)
+		VolumeUp(&PLAYER)
 	case VOLUME_DOWN:
-		VolumeDown(&player)
+		VolumeDown(&PLAYER)
 	case CHANGE_PLAYORDER_NORMAL:
-		player.PlayOrder = PLAYORDER_NORMAL
+		PLAYER.PlayOrder = PLAYORDER_NORMAL
 	case CHANGE_PLAYORDER_RANDOM:
-		player.PlayOrder = PLAYORDER_RANDOM
+		PLAYER.PlayOrder = PLAYORDER_RANDOM
 	case CHANGE_PLAYORDER_RANDOM_NO_REPEAT:
-		player.PlayOrder = PLAYORDER_RANDOM_NO_REPEAT
+		PLAYER.PlayOrder = PLAYORDER_RANDOM_NO_REPEAT
 	case DELETE:
-		DeleteSongs(&player, scroll)
+		DeleteSongs(&PLAYER, scroll)
 	case COPY_FULL_FILE_PATH:
-		SongFilepathToClipboard(&player, scroll)
+		SongFilepathToClipboard(&PLAYER, scroll)
 	case REFRESH:
-		RefreshPlaylist(&player, scroll)
+		RefreshPlaylist(&PLAYER, scroll)
 	}
 	return nil
 }
@@ -576,24 +651,6 @@ const (
 	PLAYORDER_RANDOM
 	PLAYORDER_RANDOM_NO_REPEAT
 )
-
-type MusicPlayer struct {
-	CurrentMusic *MusicFile
-	RaylibMusic  *rl.Music
-	//CustomMusic  CustomPCMSource
-	State      MusicState
-	Volume     float32
-	TimePlayed float32
-	TimeLength float32
-
-	PlaylistPath    string
-	HeaderCols      []HeaderCol
-	Playlist        []*MusicFile
-	SelectedSongs   map[int]struct{}
-	PlayedSongs     []int
-	PlayOrder       PlayOrder
-	RemainingUnique []int
-}
 
 func Push[T any](x T, arr *[]T) {
 	if arr == nil {
@@ -662,6 +719,8 @@ func UpdatePlayer(player *MusicPlayer, scroll *cui.Scroll[*MusicFile]) error {
 		player.TimePlayed = rl.GetMusicTimePlayed(*player.RaylibMusic)
 		player.TimeLength = rl.GetMusicTimeLength(*player.RaylibMusic)
 		if player.TimePlayed >= player.TimeLength-0.05 {
+			player.Playcount[player.CurrentMusic.RelativePath] += 1
+			player.CurrentMusic.PlayCount += 1
 			nextIndex, err := NextSong(player)
 			if err != nil {
 				return err
@@ -669,8 +728,6 @@ func UpdatePlayer(player *MusicPlayer, scroll *cui.Scroll[*MusicFile]) error {
 			scroll.Cursor = nextIndex
 			cui.CenterCursor(scroll)
 			scroll.Dirty = true
-			playcount[player.CurrentMusic.RelativePath] += 1
-			player.CurrentMusic.PlayCount += 1
 		}
 	}
 	return nil
@@ -856,6 +913,7 @@ func playSongAt(player *MusicPlayer, index int) error {
 	music = rl.LoadMusicStream(nextSong.File.Path)
 	player.RaylibMusic = &music
 	rl.PlayMusicStream(*player.RaylibMusic)
+	rl.SetMusicVolume(*player.RaylibMusic, player.Volume)
 	player.State = PLAYING
 	return nil
 }
@@ -1116,7 +1174,34 @@ func SeparateFilenameAndExt(path string) (_filename, _ext string) {
 const state_filename = "playcount_data"
 const configFolder = "~/.config/music-player/"
 
-func saveState(playcount map[string]int) error {
+type MusicPlayerNonPointer struct {
+	CurrentMusicPath string
+	State            MusicState
+	Volume           float32
+	TimePlayed       float32
+	TimeLength       float32
+
+	PlaylistPath string
+	HeaderCols   []HeaderCol
+	PlayOrder    PlayOrder
+	Playcount    map[string]int
+}
+
+func saveState(program MusicPlayer) error {
+	p := MusicPlayerNonPointer{
+		State:      program.State,
+		Volume:     program.Volume,
+		TimePlayed: program.TimePlayed,
+		TimeLength: program.TimeLength,
+
+		PlaylistPath: program.PlaylistPath,
+		HeaderCols:   program.HeaderCols,
+		PlayOrder:    program.PlayOrder,
+		Playcount:    program.Playcount,
+	}
+	if program.CurrentMusic != nil {
+		p.CurrentMusicPath = program.CurrentMusic.File.Path
+	}
 	path, err := ExpandHome(configFolder)
 	if err != nil {
 		return err
@@ -1132,10 +1217,10 @@ func saveState(playcount map[string]int) error {
 	defer file.Close()
 
 	encoder := gob.NewEncoder(file)
-	return encoder.Encode(playcount)
+	return encoder.Encode(p)
 }
 
-func loadState() (map[string]int, error) {
+func LoadState() (*MusicPlayerNonPointer, error) {
 	path, err := ExpandHome(configFolder)
 	if err != nil {
 		return nil, err
@@ -1145,13 +1230,13 @@ func loadState() (map[string]int, error) {
 		return nil, err
 	}
 	defer file.Close()
-	state := make(map[string]int, 0)
+	state := MusicPlayerNonPointer{}
 	encoder := gob.NewDecoder(file)
 	err = encoder.Decode(&state)
 	if err != nil {
 		return nil, err
 	}
-	return state, nil
+	return &state, nil
 }
 
 func LoadMusicFiles(path string) ([]*MusicFile, []HeaderCol, error) {
@@ -1196,7 +1281,7 @@ func LoadMusicFiles(path string) ([]*MusicFile, []HeaderCol, error) {
 			}
 			dur, err := ReadDurationFile(f)
 			if err != nil {
-				fmt.Printf("couldn't read duration for %v: %v\n", file.Path, err.Error())
+				//fmt.Printf("couldn't read duration for %v: %v\n", file.Path, err.Error())
 			}
 			f.Seek(0, 0)
 			meta, err := tag.ReadFrom(f)
@@ -1216,8 +1301,8 @@ func LoadMusicFiles(path string) ([]*MusicFile, []HeaderCol, error) {
 				mus.Title = meta.Title()
 			}
 			mus.Duration = dur
-			mus.DurationStr = formatDuration(float32(dur.Seconds()))
-			mus.PlayCount = playcount[rel]
+			mus.DurationStr = FormatDuration(float32(dur.Seconds()))
+			mus.PlayCount = PLAYER.Playcount[rel]
 			track, trackTotal := meta.Track()
 			trackStr := ""
 			if track == 0 && trackTotal == 0 {
@@ -1283,7 +1368,7 @@ func LoadMusicFiles(path string) ([]*MusicFile, []HeaderCol, error) {
 	totalChars += float32(dataSet["title"].Average)
 	totalChars += float32(dataSet["tracknumber"].Average)
 	totalChars += float32(dataSet["duration"].Average)
-	totalChars += float32(dataSet["playcount"].Average)
+	totalChars += float32(2) //dataSet["playcount"].Average)
 	//totalChars += dataSet["path"].Average
 
 	indexPercent := float32(indexCharCount) / totalChars
@@ -1292,16 +1377,16 @@ func LoadMusicFiles(path string) ([]*MusicFile, []HeaderCol, error) {
 	albumPercent := float32(dataSet["album"].Average) / totalChars
 	artistPercent := float32(dataSet["artist"].Average) / totalChars
 	durationPercent := float32(dataSet["duration"].Average) / totalChars
-	playcountPercent := float32(dataSet["playcount"].Average) / totalChars
+	playcountPercent := float32(2) / totalChars //float32(dataSet["playcount"].Average) / totalChars
 	pathPercent := float32(0)
 
-	headerCols = append(headerCols, HeaderCol{"index", indexCharCount, indexPercent})
+	headerCols = append(headerCols, HeaderCol{"index", 4, indexPercent})
 	headerCols = append(headerCols, HeaderCol{"tracknumber", dataSet["tracknumber"].Average, tracknumberPercent})
 	headerCols = append(headerCols, HeaderCol{"title", dataSet["title"].Average, titlePercent})
 	headerCols = append(headerCols, HeaderCol{"album", dataSet["album"].Average, albumPercent})
 	headerCols = append(headerCols, HeaderCol{"artist", dataSet["artist"].Average, artistPercent})
 	headerCols = append(headerCols, HeaderCol{"duration", dataSet["duration"].Average, durationPercent})
-	headerCols = append(headerCols, HeaderCol{"playcount", dataSet["playcount"].Average, playcountPercent})
+	headerCols = append(headerCols, HeaderCol{"playcount", 2, playcountPercent})
 	headerCols = append(headerCols, HeaderCol{"path", dataSet["path"].Average, pathPercent})
 	return musicFiles, headerCols, nil
 }
