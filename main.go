@@ -104,56 +104,6 @@ type ScreenData struct {
 	PrevFrameScreen rl.Vector2
 }
 
-func UpdateScreenResize(s *ScreenData, width, height float32) {
-	s.HasResized = s.PrevFrameScreen.X != width || s.PrevFrameScreen.Y != height
-	if s.HasResized {
-		s.PrevFrameScreen.X = width
-		s.PrevFrameScreen.Y = height
-	}
-}
-func DrawDebugInfo(bounds *rl.Rectangle) {
-	const padding = 10
-	statusBarText := fmt.Sprintf("FPS: %d FrameTime:%.2fms Alloc: %vMiB TotalAlloc: %vMiB Sys: %vMiB NumGC: %v",
-		rl.GetFPS(), rl.GetFrameTime()*1000, cui.Alloc, cui.TotalAlloc, cui.Sys, cui.NumGC)
-	text, lines := cui.WrapMonospaceQuick(
-		[]rune(statusBarText),
-		FONT.CharacterWidth, FONT.Spacing, bounds.Width-padding*2,
-	)
-	fpsInfoArea := cui.CutTop(bounds, FONT.Padding*float32(lines))
-	rl.DrawRectangleRec(fpsInfoArea, THEME.Bg)
-	rl.DrawRectangleLinesEx(fpsInfoArea, 1, THEME.Border)
-	textPos := rl.Vector2{
-		fpsInfoArea.X + padding,
-		fpsInfoArea.Y + (fpsInfoArea.Height-(FONT.Size*float32(lines)))/2,
-	}
-	cui.DrawText(FONT, textPos, string(text), THEME.Text)
-}
-
-var MusicFile_filter_func = func(query string, items []*MusicFile) ([]*MusicFile, []int) {
-	filtered := make([]*MusicFile, 0)
-	indexes := make([]int, 0)
-	for i, it := range items {
-		if strings.Contains(strings.ToLower(it.RelativePath), strings.ToLower(query)) {
-			filtered = append(filtered, it)
-			indexes = append(indexes, i)
-		}
-	}
-	return filtered, indexes
-}
-
-func FormatDuration(seconds float32) string {
-	total := int(seconds + 0.5)
-
-	h := total / 3600
-	m := (total % 3600) / 60
-	s := total % 60
-	if h > 0 {
-		return fmt.Sprintf("%02d:%02d:%02d", h, m, s)
-	}
-
-	return fmt.Sprintf("%02d:%02d", m, s)
-}
-
 var PLAYER MusicPlayer
 
 type MusicPlayer struct {
@@ -208,7 +158,8 @@ func main() {
 		PLAYER = MusicPlayer{
 			Volume:        1,
 			PlayedSongs:   make([]int, 0),
-			SelectedSongs: make(map[int]struct{}),
+			SelectedSongs: make(map[int]struct{}, 0),
+			Playcount:     make(map[string]int, 0),
 			PlayOrder:     PLAYORDER_RANDOM_NO_REPEAT,
 		}
 		if len(path) == 0 {
@@ -230,8 +181,23 @@ func main() {
 			fmt.Printf("overriding previous saved path\n")
 			state.PlaylistPath = path
 		}
-		PLAYER.Playcount = state.Playcount
-		musicfiles, headerCols, err := LoadMusicFiles(state.PlaylistPath)
+		PLAYER = MusicPlayer{
+			RaylibMusic: nil,
+			State:       state.State,
+			Volume:      state.Volume,
+			TimePlayed:  state.TimePlayed,
+			TimeLength:  state.TimeLength,
+
+			PlaylistPath: state.PlaylistPath,
+			HeaderCols:   state.HeaderCols,
+			//Playlist:        state.Playlist,
+			PlayedSongs:   make([]int, 0),         //state.SelectedSongs,
+			SelectedSongs: make(map[int]struct{}), //state.PlayedSongs,
+			PlayOrder:     state.PlayOrder,
+			//RemainingUnique: state.RemainingUnique,
+			Playcount: state.Playcount,
+		}
+		musicfiles, headerCols, err := LoadMusicFiles(PLAYER.PlaylistPath)
 		if err != nil {
 			panic(err)
 		}
@@ -244,26 +210,10 @@ func main() {
 				}
 			}
 		}
-		PLAYER = MusicPlayer{
-			CurrentMusic: currentMusic,
-			RaylibMusic:  nil,
-			State:        state.State,
-			Volume:       state.Volume,
-			TimePlayed:   state.TimePlayed,
-			TimeLength:   state.TimeLength,
-
-			PlaylistPath: state.PlaylistPath,
-			HeaderCols:   state.HeaderCols,
-			//Playlist:        state.Playlist,
-			PlayedSongs:   make([]int, 0),         //state.SelectedSongs,
-			SelectedSongs: make(map[int]struct{}), //state.PlayedSongs,
-			PlayOrder:     state.PlayOrder,
-			//RemainingUnique: state.RemainingUnique,
-		}
-
-		if len(PLAYER.HeaderCols) == 0 {
-			PLAYER.HeaderCols = headerCols
-		}
+		PLAYER.CurrentMusic = currentMusic
+		//if len(PLAYER.HeaderCols) == 0 {
+		PLAYER.HeaderCols = headerCols
+		//}
 		PLAYER.Playlist = musicfiles
 	}
 
@@ -395,6 +345,43 @@ func main() {
 	}
 }
 
+var MusicFile_filter_func = func(query string, items []*MusicFile) ([]*MusicFile, []int) {
+	filtered := make([]*MusicFile, 0)
+	indexes := make([]int, 0)
+	for i, it := range items {
+		if strings.Contains(strings.ToLower(it.RelativePath), strings.ToLower(query)) {
+			filtered = append(filtered, it)
+			indexes = append(indexes, i)
+		}
+	}
+	return filtered, indexes
+}
+
+func UpdateScreenResize(s *ScreenData, width, height float32) {
+	s.HasResized = s.PrevFrameScreen.X != width || s.PrevFrameScreen.Y != height
+	if s.HasResized {
+		s.PrevFrameScreen.X = width
+		s.PrevFrameScreen.Y = height
+	}
+}
+func DrawDebugInfo(bounds *rl.Rectangle) {
+	const padding = 10
+	statusBarText := fmt.Sprintf("FPS: %d FrameTime:%.2fms Alloc: %vMiB TotalAlloc: %vMiB Sys: %vMiB NumGC: %v",
+		rl.GetFPS(), rl.GetFrameTime()*1000, cui.Alloc, cui.TotalAlloc, cui.Sys, cui.NumGC)
+	text, lines := cui.WrapMonospaceQuick(
+		[]rune(statusBarText),
+		FONT.CharacterWidth, FONT.Spacing, bounds.Width-padding*2,
+	)
+	fpsInfoArea := cui.CutTop(bounds, FONT.Padding*float32(lines))
+	rl.DrawRectangleRec(fpsInfoArea, THEME.Bg)
+	rl.DrawRectangleLinesEx(fpsInfoArea, 1, THEME.Border)
+	textPos := rl.Vector2{
+		fpsInfoArea.X + padding,
+		fpsInfoArea.Y + (fpsInfoArea.Height-(FONT.Size*float32(lines)))/2,
+	}
+	cui.DrawText(FONT, textPos, string(text), THEME.Text)
+}
+
 var SHADER rl.Shader
 var RESOLUTIONLOC int32
 var TIMELOC int32
@@ -422,9 +409,12 @@ type HeaderCol struct {
 
 func DrawScrollHeader(bounds rl.Rectangle) {
 	t := cui.BoxTheme{1, rl.White, rl.White, rl.Gray}
-	width := bounds.Width
-	for _, col := range PLAYER.HeaderCols {
+	width := bounds.Width - 8 //fixme: this is the scroll width
+	for i, col := range PLAYER.HeaderCols {
 		colWidth := width * col.SizePercent
+		if i == len(PLAYER.HeaderCols)-1 {
+			colWidth = bounds.Width
+		}
 		colBounds := cui.CutLeft(&bounds, colWidth)
 		cui.DrawBoxEx(colBounds, t)
 		cui.BeginScissorMode(colBounds)
@@ -450,10 +440,10 @@ func DrawItem(bounds rl.Rectangle, index int, mFile *MusicFile, selected, highli
 	cui.BeginScissorMode(bounds)
 	rl.DrawRectangleRec(bounds, rl.Red)
 	for i, col := range PLAYER.HeaderCols {
-		if i == 3 {
-			continue
-		}
 		colWidth := width * col.SizePercent
+		if i == len(PLAYER.HeaderCols)-1 {
+			colWidth = bounds.Width
+		}
 		colBounds := cui.CutLeft(&bounds, colWidth)
 		color := t.Bg
 		tColor := t.Text
@@ -1362,32 +1352,39 @@ func LoadMusicFiles(path string) ([]*MusicFile, []HeaderCol, error) {
 	}
 	var headerCols = make([]HeaderCol, 0)
 	indexCharCount := len(fmt.Sprintf("%d", len(musicFiles)))
+	tracknumberLen := dataSet["tracknumber"].Average + 2
+	titleLen := dataSet["title"].Average
+	albumLen := dataSet["album"].Average
+	artistLen := dataSet["artist"].Average
+	durationLen := dataSet["duration"].Average
+	playcountLen := dataSet["playcount"].Average + 2
+	pathLen := 2 //dataSet["path"].Average
 	totalChars := float32(indexCharCount)
-	totalChars += float32(dataSet["album"].Average)
-	totalChars += float32(dataSet["artist"].Average)
-	totalChars += float32(dataSet["title"].Average)
-	totalChars += float32(dataSet["tracknumber"].Average)
-	totalChars += float32(dataSet["duration"].Average)
-	totalChars += float32(2) //dataSet["playcount"].Average)
-	//totalChars += dataSet["path"].Average
+	totalChars += float32(tracknumberLen)
+	totalChars += float32(titleLen)
+	totalChars += float32(albumLen)
+	totalChars += float32(artistLen)
+	totalChars += float32(durationLen)
+	totalChars += float32(playcountLen)
+	totalChars += float32(pathLen)
 
 	indexPercent := float32(indexCharCount) / totalChars
-	tracknumberPercent := float32(4) / totalChars
-	titlePercent := float32(dataSet["title"].Average) / totalChars
-	albumPercent := float32(dataSet["album"].Average) / totalChars
-	artistPercent := float32(dataSet["artist"].Average) / totalChars
-	durationPercent := float32(dataSet["duration"].Average) / totalChars
-	playcountPercent := float32(2) / totalChars //float32(dataSet["playcount"].Average) / totalChars
-	pathPercent := float32(0)
+	tracknumberPercent := float32(tracknumberLen) / totalChars
+	titlePercent := float32(titleLen) / totalChars
+	albumPercent := float32(albumLen) / totalChars
+	artistPercent := float32(artistLen) / totalChars
+	durationPercent := float32(durationLen) / totalChars
+	playcountPercent := float32(playcountLen) / totalChars
+	pathPercent := float32(pathLen) / totalChars
 
 	headerCols = append(headerCols, HeaderCol{"index", 4, indexPercent})
-	headerCols = append(headerCols, HeaderCol{"tracknumber", dataSet["tracknumber"].Average, tracknumberPercent})
-	headerCols = append(headerCols, HeaderCol{"title", dataSet["title"].Average, titlePercent})
-	headerCols = append(headerCols, HeaderCol{"album", dataSet["album"].Average, albumPercent})
-	headerCols = append(headerCols, HeaderCol{"artist", dataSet["artist"].Average, artistPercent})
-	headerCols = append(headerCols, HeaderCol{"duration", dataSet["duration"].Average, durationPercent})
-	headerCols = append(headerCols, HeaderCol{"playcount", 2, playcountPercent})
-	headerCols = append(headerCols, HeaderCol{"path", dataSet["path"].Average, pathPercent})
+	headerCols = append(headerCols, HeaderCol{"tracknumber", tracknumberLen, tracknumberPercent})
+	headerCols = append(headerCols, HeaderCol{"title", titleLen, titlePercent})
+	headerCols = append(headerCols, HeaderCol{"album", albumLen, albumPercent})
+	headerCols = append(headerCols, HeaderCol{"artist", artistLen, artistPercent})
+	headerCols = append(headerCols, HeaderCol{"duration", durationLen, durationPercent})
+	headerCols = append(headerCols, HeaderCol{"playcount", playcountLen, playcountPercent})
+	headerCols = append(headerCols, HeaderCol{"path", pathLen, pathPercent})
 	return musicFiles, headerCols, nil
 }
 
@@ -1461,4 +1458,17 @@ func DeleteFileTrashbin(fullpath string) error {
 		return err
 	}
 	return nil
+}
+
+func FormatDuration(seconds float32) string {
+	total := int(seconds + 0.5)
+
+	h := total / 3600
+	m := (total % 3600) / 60
+	s := total % 60
+	if h > 0 {
+		return fmt.Sprintf("%02d:%02d:%02d", h, m, s)
+	}
+
+	return fmt.Sprintf("%02d:%02d", m, s)
 }
