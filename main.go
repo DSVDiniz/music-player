@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "embed"
 	"encoding/gob"
 	"flag"
 	"fmt"
@@ -125,6 +126,9 @@ type MusicPlayer struct {
 	Playcount       map[string]int
 }
 
+//go:embed thunder-rumble.mp3
+var soundData []byte
+
 func main() {
 	rand.Seed(time.Now().UnixNano())
 
@@ -152,6 +156,15 @@ func main() {
 	if err != nil {
 		fmt.Printf("%v : laoding default player options\n", err.Error())
 	}
+
+	go cui.MonitorMemory()
+	rl.SetTraceLogLevel(rl.LogNone)
+	rl.SetConfigFlags(rl.FlagWindowResizable)
+	rl.InitWindow(800, 600, "music-player")
+	defer rl.CloseWindow()
+	rl.SetExitKey(rl.KeyNull)
+
+	rl.InitAudioDevice()
 
 	if state == nil {
 		println("couldn't find saved state, using default values")
@@ -210,21 +223,18 @@ func main() {
 				}
 			}
 		}
+		//fixme: resuming songs after shutdown is not working
 		PLAYER.CurrentMusic = currentMusic
+		if PLAYER.CurrentMusic != nil {
+			mus := rl.LoadMusicStream(PLAYER.CurrentMusic.File.Path)
+			PLAYER.RaylibMusic = &mus
+			PLAYER.State = PAUSED
+		}
 		//if len(PLAYER.HeaderCols) == 0 {
 		PLAYER.HeaderCols = headerCols
 		//}
 		PLAYER.Playlist = musicfiles
 	}
-
-	go cui.MonitorMemory()
-	rl.SetTraceLogLevel(rl.LogNone)
-	rl.SetConfigFlags(rl.FlagWindowResizable)
-	rl.InitWindow(800, 600, "music-player")
-	defer rl.CloseWindow()
-	rl.SetExitKey(rl.KeyNull)
-
-	rl.InitAudioDevice()
 
 	SHADER = rl.LoadShader("shaders/shader.vs", "shaders/shader.fs")
 	RESOLUTIONLOC = rl.GetShaderLocation(SHADER, "resolution")
@@ -264,7 +274,17 @@ func main() {
 	exit := rl.WindowShouldClose()
 	showFps := true
 	screen := rl.Rectangle{}
+
+	cycle := toDuration(170)
+	rumbleSound := NewCyclicalSound(soundData, cycle)
 	for !exit {
+		UpdateCycle(rumbleSound)
+		if PLAYER.State == PLAYING && rumbleSound.State != CYC_STOP {
+			rumbleSound.State = CYC_STOP
+		} else if (PLAYER.State == STOPPED || PLAYER.State == PAUSED) && (rumbleSound.State == CYC_STOP) {
+			rumbleSound.State = CYC_START
+		}
+
 		globalHotkeyAction := cui.NONE
 		select {
 		case act := <-hotkeyChan:
@@ -718,6 +738,7 @@ func UpdatePlayer(player *MusicPlayer, scroll *cui.Scroll[*MusicFile]) error {
 			scroll.Cursor = nextIndex
 			cui.CenterCursor(scroll)
 			scroll.Dirty = true
+			player.TimePlayed = 0
 		}
 	}
 	return nil
@@ -1471,4 +1492,63 @@ func FormatDuration(seconds float32) string {
 	}
 
 	return fmt.Sprintf("%02d:%02d", m, s)
+}
+
+type CyclicalSoundState int
+
+const (
+	CYC_STOP CyclicalSoundState = iota
+	CYC_START
+	CYC_CHECK
+	CYC_PLAY
+	CYC_PLAYING
+)
+
+type CyclicalSound struct {
+	Sound      rl.Music
+	State      CyclicalSoundState
+	CycleTime  time.Duration
+	Start      time.Time
+	TimePlayed float32
+	TimeLength float32
+}
+
+func NewCyclicalSound(data []byte, cycleTime time.Duration) *CyclicalSound {
+	mus := rl.LoadMusicStreamFromMemory(".mp3", data, int32(len(data)))
+	cyc := &CyclicalSound{
+		Sound:     mus,
+		State:     CYC_STOP,
+		CycleTime: cycleTime,
+		Start:     time.Now(),
+	}
+	cyc.TimeLength = rl.GetMusicTimeLength(cyc.Sound)
+	return cyc
+}
+
+func UpdateCycle(c *CyclicalSound) {
+	switch c.State {
+	case CYC_STOP:
+		if rl.IsMusicStreamPlaying(c.Sound) {
+			rl.StopMusicStream(c.Sound)
+		}
+	case CYC_START:
+		c.Start = time.Now()
+		c.State = CYC_CHECK
+	case CYC_CHECK:
+		elapsed := time.Since(c.Start)
+		if elapsed >= c.CycleTime {
+			c.State = CYC_PLAY
+		}
+	case CYC_PLAY:
+		rl.PlayMusicStream(c.Sound)
+		c.State = CYC_PLAYING
+	case CYC_PLAYING:
+		rl.UpdateMusicStream(c.Sound)
+		c.TimePlayed = rl.GetMusicTimePlayed(c.Sound)
+		if c.TimePlayed >= c.TimeLength-0.05 {
+			rl.StopMusicStream(c.Sound)
+			c.State = CYC_START
+			c.TimePlayed = 0
+		}
+	}
 }

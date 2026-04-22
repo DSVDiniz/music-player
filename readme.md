@@ -20,7 +20,7 @@
 - [x] random (no repeat) order
     - [x] even if user chooses song manually, still should work
 - [x] default order
-- [ ] loop playlist
+- [x] loop playlist
 - [ ] save playlist
 - [ ] load playlist
 - [ ] active playlist
@@ -52,6 +52,8 @@
 - [x] copy full file path with ctrl+c
     - [ ] show a notification of what happened
 - [x] refresh music list with F5
+- [ ] scroll header should be modifiable
+- [ ] play sound every X minutes feature (only if no music is playing)
 
 # Bugs
 - [ ] when rewinding song until start, NextSong() is called on Update() for some reason 
@@ -59,3 +61,9 @@
 - [x] fix scroll filter crashing problems
 - [x] after filtering and cancelling, cursor should point to the file it was on filter
 - [x] refresh is strange, some songs appear and disappear randomly?
+- [ ] resuming songs after shutdown
+- [ ] scroll data isn't stored after shutdown
+- [ ] font is bad, try to figure it out
+- [ ] mouse double click should play song
+- [ ] delete song shouldn't take that much time, we don't need to reload all files
+
