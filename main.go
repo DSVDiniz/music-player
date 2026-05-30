@@ -129,6 +129,10 @@ type MusicPlayer struct {
 //go:embed thunder-rumble.mp3
 var soundData []byte
 
+const state_filename = "playcount_data"
+const config_folder = "~/.config/music-player/"
+const log_filename = "~/.config/music-player/log.log"
+
 func main() {
 	rand.Seed(time.Now().UnixNano())
 
@@ -137,7 +141,9 @@ func main() {
 	go ListenHotkeys(hotkeyChan)
 
 	var p string
+	var noise bool
 	flag.StringVar(&p, "path", "", "the folder where all unorganized music files are (recursive)")
+	flag.BoolVar(&noise, "noise", true, "play cyclical sound")
 	flag.Parse()
 	var path string
 	var err error
@@ -147,6 +153,15 @@ func main() {
 			panic(err)
 		}
 	}
+	logPath, err := ExpandHome(log_filename)
+	if err != nil {
+		panic(err)
+	}
+	log, err := NewLogger(logPath)
+	if err != nil {
+		panic(err)
+	}
+
 	gob.Register(MusicPlayerNonPointer{})
 	gob.Register(MusicFile{})
 	gob.Register(rl.Music{})
@@ -154,7 +169,7 @@ func main() {
 
 	state, err := LoadState()
 	if err != nil {
-		fmt.Printf("%v : laoding default player options\n", err.Error())
+		log.Info("%v : loading default player options\n", err.Error())
 	}
 
 	go cui.MonitorMemory()
@@ -167,7 +182,7 @@ func main() {
 	rl.InitAudioDevice()
 
 	if state == nil {
-		println("couldn't find saved state, using default values")
+		log.Info("couldn't find saved state, using default values")
 		PLAYER = MusicPlayer{
 			Volume:        1,
 			PlayedSongs:   make([]int, 0),
@@ -176,22 +191,27 @@ func main() {
 			PlayOrder:     PLAYORDER_RANDOM_NO_REPEAT,
 		}
 		if len(path) == 0 {
-			panic("no path was specified and no saved data was found, use --help")
+			log.Panic("no path was specified and no saved data was found, use --help")
 		}
 		musicfiles, headerCols, err := LoadMusicFiles(path)
 		if err != nil {
-			panic(err)
+			log.Panic("%v", err.Error())
 		}
 		PLAYER.PlaylistPath = path
 		PLAYER.HeaderCols = headerCols
 		PLAYER.Playlist = musicfiles
 	} else {
-		println("loading saved state")
+		log.Info("loading saved state")
 		if len(path) == 0 && len(state.PlaylistPath) == 0 {
-			panic("no path was specified and saved data had no playlist path, use --help and at least add a path")
+			log.Panic("no path was specified and saved data had no playlist path, use --help and at least add a path")
+		}
+		if !FileExists(state.PlaylistPath) {
+			if len(path) == 0 {
+				log.Panic("saved path does not exist and no path was specified!")
+			}
 		}
 		if len(path) > 0 {
-			fmt.Printf("overriding previous saved path\n")
+			log.Info("overriding previous saved path\n")
 			state.PlaylistPath = path
 		}
 		PLAYER = MusicPlayer{
@@ -212,7 +232,7 @@ func main() {
 		}
 		musicfiles, headerCols, err := LoadMusicFiles(PLAYER.PlaylistPath)
 		if err != nil {
-			panic(err)
+			log.Panic("%v", err.Error())
 		}
 		var currentMusic *MusicFile
 		if len(musicfiles) > 0 {
@@ -246,18 +266,11 @@ func main() {
 	//fontPath := "roboto.ttf"
 	fontPath, err := cui.GetSystemFont()
 	if err != nil {
-		fmt.Printf("couldn't load system font: %s", err)
+		log.Warn("couldn't load system font: %s", err)
 	}
-	const font_resolution = 128
 	const font_size = 20
-	const font_spacing = 2
-	const line_spacing = 2
 	const codepointSize = 20000
-	FONT = cui.NewFont(fontPath,
-		font_resolution,
-		font_size,
-		font_spacing,
-		line_spacing, codepointSize)
+	FONT = cui.NewFont(fontPath, font_size, codepointSize)
 	FONT.IsMonospace = true
 	defer rl.UnloadFont(FONT.Font)
 
@@ -266,23 +279,25 @@ func main() {
 		FilterSLE:  cui.NewSingleLineEditor(),
 	}
 
-	playlistTitle := fmt.Sprintf("%s", path)
+	playlistTitle := fmt.Sprintf("%s", PLAYER.PlaylistPath)
 	title := fmt.Sprintf("music-player - %s", playlistTitle)
 
 	input := cui.NewInput()
 	screenData := &ScreenData{}
 	exit := rl.WindowShouldClose()
-	showFps := true
+	showFps := false
 	screen := rl.Rectangle{}
 
 	cycle := toDuration(170)
 	rumbleSound := NewCyclicalSound(soundData, cycle)
 	for !exit {
-		UpdateCycle(rumbleSound)
-		if PLAYER.State == PLAYING && rumbleSound.State != CYC_STOP {
-			rumbleSound.State = CYC_STOP
-		} else if (PLAYER.State == STOPPED || PLAYER.State == PAUSED) && (rumbleSound.State == CYC_STOP) {
-			rumbleSound.State = CYC_START
+		if noise {
+			UpdateCycle(rumbleSound)
+			if PLAYER.State == PLAYING && rumbleSound.State != CYC_STOP {
+				rumbleSound.State = CYC_STOP
+			} else if (PLAYER.State == STOPPED || PLAYER.State == PAUSED) && (rumbleSound.State == CYC_STOP) {
+				rumbleSound.State = CYC_START
+			}
 		}
 
 		globalHotkeyAction := cui.NONE
@@ -299,7 +314,7 @@ func main() {
 		UpdateScreenResize(screenData, screen.Width, screen.Height)
 		err := UpdatePlayer(&PLAYER, &scroll)
 		if err != nil {
-			println(err)
+			log.Panic("%v", err.Error())
 		}
 		cui.UpdateInput(input)
 
@@ -352,7 +367,7 @@ func main() {
 		}
 		err = Input(action, &scroll)
 		if err != nil {
-			println(err)
+			log.Warn("%v", err.Error())
 		}
 	}
 	if PLAYER.RaylibMusic != nil {
@@ -388,7 +403,7 @@ func DrawDebugInfo(bounds *rl.Rectangle) {
 	const padding = 10
 	statusBarText := fmt.Sprintf("FPS: %d FrameTime:%.2fms Alloc: %vMiB TotalAlloc: %vMiB Sys: %vMiB NumGC: %v",
 		rl.GetFPS(), rl.GetFrameTime()*1000, cui.Alloc, cui.TotalAlloc, cui.Sys, cui.NumGC)
-	text, lines := cui.WrapMonospaceQuick(
+	text, lines := cui.WrapMonospaceSlow(
 		[]rune(statusBarText),
 		FONT.CharacterWidth, FONT.Spacing, bounds.Width-padding*2,
 	)
@@ -537,7 +552,7 @@ func DrawFileInfo(file *MusicFile, wrappedFilepath string, wrappedLines int, bou
 	}
 	cui.BeginScissorMode(bounds)
 	lineHeight := FONT.LineSpacing + FONT.Size
-	fileInfoBoundsPadded := cui.Pad2(bounds, FONT.Size, FONT.LineSpacing*4)
+	fileInfoBoundsPadded := cui.PadEx(bounds, FONT.WhitesSpaceWidth*2, FONT.Size/2)
 	pos := rl.Vector2{fileInfoBoundsPadded.X, fileInfoBoundsPadded.Y}
 	cui.DrawBox(bounds, 1, rl.Black, rl.White)
 	cui.DrawText(FONT, pos, wrappedFilepath, rl.White)
@@ -604,11 +619,17 @@ func Input(action cui.Action, scroll *cui.Scroll[*MusicFile]) error {
 	}
 	switch action {
 	case cui.CLICK:
-		PlaySong(&PLAYER, scroll)
+		err := PlaySong(&PLAYER, scroll)
+		if err != nil {
+			return err
+		}
 	case cui.CANCEL:
 		//nothing
 	case PLAY_PAUSE:
-		PlayOrPauseSong(&PLAYER, scroll)
+		err := PlayOrPauseSong(&PLAYER, scroll)
+		if err != nil {
+			return err
+		}
 	case STOP:
 		StopSong(&PLAYER)
 	case NEXT:
@@ -645,11 +666,17 @@ func Input(action cui.Action, scroll *cui.Scroll[*MusicFile]) error {
 	case CHANGE_PLAYORDER_RANDOM_NO_REPEAT:
 		PLAYER.PlayOrder = PLAYORDER_RANDOM_NO_REPEAT
 	case DELETE:
-		DeleteSongs(&PLAYER, scroll)
+		err := DeleteSongs(&PLAYER, scroll)
+		if err != nil {
+			return err
+		}
 	case COPY_FULL_FILE_PATH:
 		SongFilepathToClipboard(&PLAYER, scroll)
 	case REFRESH:
-		RefreshPlaylist(&PLAYER, scroll)
+		err := RefreshPlaylist(&PLAYER, scroll)
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -864,7 +891,7 @@ func RewindSong(player *MusicPlayer) {
 	newTime := cui.Max(currentTime-4, 0.01)
 	rl.SeekMusicStream(*player.RaylibMusic, newTime)
 }
-func DeleteSongs(player *MusicPlayer, scroll *cui.Scroll[*MusicFile]) {
+func DeleteSongs(player *MusicPlayer, scroll *cui.Scroll[*MusicFile]) error {
 	//todo: delete multiple songs, depending on what's selected
 	//needs a confirmation modal...maybe
 	song := cui.GetHighlightedScrollItem(*scroll, player.Playlist)
@@ -873,15 +900,15 @@ func DeleteSongs(player *MusicPlayer, scroll *cui.Scroll[*MusicFile]) {
 	}
 	err := DeleteFileTrashbin(song.File.Path)
 	if err != nil {
-		fmt.Printf("%v\n", err.Error())
+		return err
 	}
 	player.Playlist = slices.Delete(player.Playlist, scroll.Cursor, scroll.Cursor+1)
 	if len(scroll.FilterItems) != 0 {
-		scroll.FilterItems = slices.Delete(scroll.FilterItems, scroll.Cursor, scroll.Cursor+1)
+		scroll.FilterItems = slices.Delete(scroll.FilterItems, scroll.FilterCursor, scroll.FilterCursor+1)
 	}
 	musicfiles, headerCols, err := LoadMusicFiles(player.PlaylistPath)
 	if err != nil {
-		panic(err)
+		return err
 	}
 	player.HeaderCols = headerCols
 	player.Playlist = musicfiles
@@ -889,15 +916,17 @@ func DeleteSongs(player *MusicPlayer, scroll *cui.Scroll[*MusicFile]) {
 	if len(scroll.FilterItems) != 0 {
 		scroll.FilterCursor = cui.Clamp(scroll.FilterCursor, 0, len(scroll.FilterItems)-1)
 	}
+	return nil
 }
-func RefreshPlaylist(player *MusicPlayer, scroll *cui.Scroll[*MusicFile]) {
+func RefreshPlaylist(player *MusicPlayer, scroll *cui.Scroll[*MusicFile]) error {
 	musicfiles, headerCols, err := LoadMusicFiles(player.PlaylistPath)
 	if err != nil {
-		panic(err)
+		return err
 	}
 	player.HeaderCols = headerCols
 	player.Playlist = musicfiles
 	//scroll.Cursor = 0 //TODO: cursor should behave better
+	return nil
 }
 
 func SongFilepathToClipboard(player *MusicPlayer, scroll *cui.Scroll[*MusicFile]) {
@@ -1182,9 +1211,6 @@ func SeparateFilenameAndExt(path string) (_filename, _ext string) {
 	return base[:index], base[index:]
 }
 
-const state_filename = "playcount_data"
-const configFolder = "~/.config/music-player/"
-
 type MusicPlayerNonPointer struct {
 	CurrentMusicPath string
 	State            MusicState
@@ -1213,7 +1239,7 @@ func saveState(program MusicPlayer) error {
 	if program.CurrentMusic != nil {
 		p.CurrentMusicPath = program.CurrentMusic.File.Path
 	}
-	path, err := ExpandHome(configFolder)
+	path, err := ExpandHome(config_folder)
 	if err != nil {
 		return err
 	}
@@ -1232,7 +1258,7 @@ func saveState(program MusicPlayer) error {
 }
 
 func LoadState() (*MusicPlayerNonPointer, error) {
-	path, err := ExpandHome(configFolder)
+	path, err := ExpandHome(config_folder)
 	if err != nil {
 		return nil, err
 	}
