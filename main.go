@@ -10,6 +10,7 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"sync"
@@ -27,7 +28,7 @@ import (
 func ListenHotkeys(c chan cui.Action) {
 	X, err := xgb.NewConn()
 	if err != nil {
-		log.Fatal(err)
+		LOG.Panic("%s", err.Error())
 	}
 
 	setup := xproto.Setup(X)
@@ -61,7 +62,7 @@ func ListenHotkeys(c chan cui.Action) {
 				xproto.GrabModeAsync,
 			).Check()
 			if err != nil {
-				log.Printf("failed to grab keycode %d: %v", keycode, err)
+				LOG.Warn("failed to grab keycode %d: %v", keycode, err)
 			}
 		}
 
@@ -70,7 +71,7 @@ func ListenHotkeys(c chan cui.Action) {
 	for {
 		ev, err := X.WaitForEvent()
 		if err != nil {
-			log.Println(err)
+			LOG.Warn("%s", err.Error())
 			continue
 		}
 
@@ -134,6 +135,18 @@ const config_folder = "~/.config/music-player/"
 const log_filename = "~/.config/music-player/log.log"
 
 func main() {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("PANIC: %v\n%s", r, debug.Stack())
+		}
+	}()
+
+	mainLoop()
+}
+
+var LOG *Logger
+
+func mainLoop() {
 	rand.Seed(time.Now().UnixNano())
 
 	hotkeyChan := make(chan cui.Action)
@@ -157,7 +170,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	log, err := NewLogger(logPath)
+	LOG, err = NewLogger(logPath)
 	if err != nil {
 		panic(err)
 	}
@@ -169,7 +182,7 @@ func main() {
 
 	state, err := LoadState()
 	if err != nil {
-		log.Info("%v : loading default player options\n", err.Error())
+		LOG.Info("%v : loading default player options\n", err.Error())
 	}
 
 	go cui.MonitorMemory()
@@ -178,11 +191,10 @@ func main() {
 	rl.InitWindow(800, 600, "music-player")
 	defer rl.CloseWindow()
 	rl.SetExitKey(rl.KeyNull)
-
 	rl.InitAudioDevice()
 
 	if state == nil {
-		log.Info("couldn't find saved state, using default values")
+		LOG.Info("couldn't find saved state, using default values")
 		PLAYER = MusicPlayer{
 			Volume:        1,
 			PlayedSongs:   make([]int, 0),
@@ -191,27 +203,27 @@ func main() {
 			PlayOrder:     PLAYORDER_RANDOM_NO_REPEAT,
 		}
 		if len(path) == 0 {
-			log.Panic("no path was specified and no saved data was found, use --help")
+			LOG.Panic("no path was specified and no saved data was found, use --help")
 		}
 		musicfiles, headerCols, err := LoadMusicFiles(path)
 		if err != nil {
-			log.Panic("%v", err.Error())
+			LOG.Panic("%v", err.Error())
 		}
 		PLAYER.PlaylistPath = path
 		PLAYER.HeaderCols = headerCols
 		PLAYER.Playlist = musicfiles
 	} else {
-		log.Info("loading saved state")
+		LOG.Info("loading saved state")
 		if len(path) == 0 && len(state.PlaylistPath) == 0 {
-			log.Panic("no path was specified and saved data had no playlist path, use --help and at least add a path")
+			LOG.Panic("no path was specified and saved data had no playlist path, use --help and at least add a path")
 		}
 		if !FileExists(state.PlaylistPath) {
 			if len(path) == 0 {
-				log.Panic("saved path does not exist and no path was specified!")
+				LOG.Panic("saved path does not exist and no path was specified!")
 			}
 		}
 		if len(path) > 0 {
-			log.Info("overriding previous saved path\n")
+			LOG.Info("overriding previous saved path\n")
 			state.PlaylistPath = path
 		}
 		PLAYER = MusicPlayer{
@@ -232,7 +244,7 @@ func main() {
 		}
 		musicfiles, headerCols, err := LoadMusicFiles(PLAYER.PlaylistPath)
 		if err != nil {
-			log.Panic("%v", err.Error())
+			LOG.Panic("%v", err.Error())
 		}
 		var currentMusic *MusicFile
 		if len(musicfiles) > 0 {
@@ -266,7 +278,7 @@ func main() {
 	//fontPath := "roboto.ttf"
 	fontPath, err := cui.GetSystemFont()
 	if err != nil {
-		log.Warn("couldn't load system font: %s", err)
+		LOG.Warn("couldn't load system font: %s", err)
 	}
 	const font_size = 20
 	const codepointSize = 20000
@@ -314,7 +326,7 @@ func main() {
 		UpdateScreenResize(screenData, screen.Width, screen.Height)
 		err := UpdatePlayer(&PLAYER, &scroll)
 		if err != nil {
-			log.Panic("%v", err.Error())
+			LOG.Panic("%v", err.Error())
 		}
 		cui.UpdateInput(input)
 
@@ -367,7 +379,7 @@ func main() {
 		}
 		err = Input(action, &scroll)
 		if err != nil {
-			log.Warn("%v", err.Error())
+			LOG.Warn("%v", err.Error())
 		}
 	}
 	if PLAYER.RaylibMusic != nil {
@@ -552,7 +564,7 @@ func DrawFileInfo(file *MusicFile, wrappedFilepath string, wrappedLines int, bou
 	}
 	cui.BeginScissorMode(bounds)
 	lineHeight := FONT.LineSpacing + FONT.Size
-	fileInfoBoundsPadded := cui.PadEx(bounds, FONT.WhitesSpaceWidth*2, FONT.Size/2)
+	fileInfoBoundsPadded := cui.PadEx(bounds, FONT.WhiteSpaceWidth*2, FONT.Size/2)
 	pos := rl.Vector2{fileInfoBoundsPadded.X, fileInfoBoundsPadded.Y}
 	cui.DrawBox(bounds, 1, rl.Black, rl.White)
 	cui.DrawText(FONT, pos, wrappedFilepath, rl.White)
@@ -955,6 +967,8 @@ func playSongAt(player *MusicPlayer, index int) error {
 	rl.PlayMusicStream(*player.RaylibMusic)
 	rl.SetMusicVolume(*player.RaylibMusic, player.Volume)
 	player.State = PLAYING
+	newTitle := fmt.Sprintf("%s - %s", nextSong.Artist, nextSong.Title)
+	rl.SetWindowTitle(newTitle)
 	return nil
 }
 
