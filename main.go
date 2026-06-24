@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"io/fs"
-	"log"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -137,7 +136,8 @@ const log_filename = "~/.config/music-player/log.log"
 func main() {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("PANIC: %v\n%s", r, debug.Stack())
+			LOG.Error("PANIC: %v\n%s", r, debug.Stack())
+			LOG.Info("%s", PLAYER.CurrentMusic.RelativePath)
 		}
 	}()
 
@@ -962,6 +962,7 @@ func playSongAt(player *MusicPlayer, index int) error {
 	player.CurrentMusic = nextSong
 
 	var music rl.Music
+	LOG.Info("playing: %s", player.CurrentMusic.RelativePath)
 	music = rl.LoadMusicStream(nextSong.File.Path)
 	player.RaylibMusic = &music
 	rl.PlayMusicStream(*player.RaylibMusic)
