@@ -778,6 +778,7 @@ func UpdatePlayer(player *MusicPlayer, scroll *cui.Scroll[*MusicFile]) error {
 			cui.CenterCursor(scroll)
 			scroll.Dirty = true
 			player.TimePlayed = 0
+			saveState(*player)
 		}
 	}
 	return nil
