@@ -91,6 +91,10 @@ func ListenHotkeys(c chan cui.Action) {
 				c <- PREVIOUS
 			case 196: //??
 				c <- NEXT_RANDOM
+				// case 196: //??
+				// 	c <- VOLUME_DOWN
+				// case 196: //??
+				// 	c <- VOLUME_UP
 			}
 		}
 	}
@@ -126,7 +130,7 @@ type MusicPlayer struct {
 	Playcount       map[string]int
 }
 
-//go:embed thunder-rumble.mp3
+//go:embed thunder-rumble-short.mp3
 var soundData []byte
 
 const state_filename = "playcount_data"
