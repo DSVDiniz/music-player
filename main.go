@@ -265,9 +265,9 @@ var LOG *Logger
 func mainLoop() {
 	rand.Seed(time.Now().UnixNano())
 
-	//hotkeyChan := make(chan cui.Action)
+	hotkeyChan := make(chan cui.Action)
 
-	//go ListenHotkeys(hotkeyChan)
+	go ListenHotkeys(hotkeyChan)
 
 	var p string
 	var noise bool
@@ -431,11 +431,11 @@ func mainLoop() {
 		}
 
 		globalHotkeyAction := cui.NONE
-		// select {
-		// case act := <-hotkeyChan:
-		// 	globalHotkeyAction = act
-		// default:
-		// }
+		select {
+		case act := <-hotkeyChan:
+			globalHotkeyAction = act
+		default:
+		}
 
 		dt := rl.GetFrameTime()
 		exit = rl.WindowShouldClose()
