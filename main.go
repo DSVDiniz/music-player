@@ -453,7 +453,7 @@ func mainLoop() {
 		remainder := screen
 
 		if showFps {
-			DrawDebugInfo(&remainder, M_THEME.Debug)
+			cui.DrawDebugInfo(FONT, &remainder, M_THEME.Debug)
 		}
 		bounds := remainder
 
@@ -528,23 +528,6 @@ func UpdateScreenResize(s *ScreenData, width, height float32) {
 		s.PrevFrameScreen.X = width
 		s.PrevFrameScreen.Y = height
 	}
-}
-func DrawDebugInfo(bounds *rl.Rectangle, t cui.BoxTextTheme) {
-	const padding = 10
-	statusBarText := fmt.Sprintf("FPS: %d FrameTime:%.2fms Alloc: %vMiB TotalAlloc: %vMiB Sys: %vMiB NumGC: %v",
-		rl.GetFPS(), rl.GetFrameTime()*1000, cui.Alloc, cui.TotalAlloc, cui.Sys, cui.NumGC)
-	text, lines := cui.WrapMonospaceSlow(
-		[]rune(statusBarText),
-		FONT.CharacterWidth, FONT.Spacing, bounds.Width-padding*2,
-	)
-	fpsInfoArea := cui.CutTop(bounds, FONT.Padding*float32(lines))
-	rl.DrawRectangleRec(fpsInfoArea, t.Bg)
-	rl.DrawRectangleLinesEx(fpsInfoArea, 1, t.Border)
-	textPos := rl.Vector2{
-		fpsInfoArea.X + padding,
-		fpsInfoArea.Y + (fpsInfoArea.Height-(FONT.Size*float32(lines)))/2,
-	}
-	cui.DrawText(FONT, textPos, string(text), t.Text)
 }
 
 var SHADER rl.Shader
