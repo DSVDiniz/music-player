@@ -102,7 +102,119 @@ func ListenHotkeys(c chan cui.Action) {
 
 var FONT cui.Font
 
-var THEME = cui.BoxTheme{Thickness: 1, Text: rl.White, Border: rl.White, Bg: rl.Black}
+var line_height float32
+
+var M_THEME = MusicPlayerTheme{
+	Background: rl.Black,
+	Default:    cui.BoxTextTheme{1, rl.White, rl.White, rl.Black},
+	Debug:      cui.BoxTextTheme{1, rl.White, rl.White, rl.Black},
+	Title: TitleTheme{
+		Thickness: 1,
+		Text:      rl.White,
+		Border:    rl.White,
+		Bg1:       rl.Black,
+		Bg2:       rl.Blue,
+	},
+
+	Volume: ProgressBarTheme{
+		Base:   cui.BoxTheme{1, rl.White, rl.Black},
+		Bar:    cui.BoxTheme{1, rl.White, rl.DarkGreen},
+		Text:   rl.White,
+		TextBg: rl.Black,
+	},
+	Time: ProgressBarTheme{
+		Base:   cui.BoxTheme{1, rl.White, rl.Black},
+		Bar:    cui.BoxTheme{1, rl.White, cui.DarkYellow},
+		Text:   rl.White,
+		TextBg: rl.Black,
+	},
+	PlayMode: PlayModeBarTheme{
+		Base:   cui.BoxTheme{1, rl.White, rl.Black},
+		Text:   rl.White,
+		TextBg: rl.Black,
+	},
+	CurrentSong: CurrentSongBarTheme{
+		Base:   cui.BoxTheme{1, rl.White, rl.Black},
+		Text:   rl.White,
+		TextBg: rl.Black,
+	},
+	CurrentSongInfo: cui.BoxTextTheme{1, rl.White, rl.White, rl.Black},
+
+	FileColors: map[string]FileTypeColor{
+		".mp3":  {rl.White, rl.Black, rl.Black, rl.White},
+		".wav":  {rl.DarkBlue, rl.Black, rl.Black, rl.DarkBlue},
+		".flac": {rl.Purple, rl.Black, rl.White, rl.Purple},
+		".vgz":  {rl.DarkGreen, rl.Black, rl.White, rl.DarkGreen},
+		".ogg":  {cui.DarkRed, rl.Black, rl.White, cui.DarkRed},
+		".webm": {rl.DarkGray, rl.Black, rl.White, rl.DarkGray},
+		".mp4":  {rl.Brown, rl.Black, rl.White, rl.Brown},
+		".spc":  {rl.Beige, rl.Black, rl.White, rl.Beige},
+	},
+	SelectedFileText:    rl.Black,
+	SelectedFileBg:      rl.Yellow,
+	HighlightedFileText: rl.Black,
+	HighlightedFileBg:   rl.Gold,
+	PlayingText:         rl.White,
+	PlayingBg:           rl.Red,
+
+	ScrollHeader: cui.BoxTextTheme{1, rl.White, rl.White, rl.Gray},
+
+	Scroll: cui.NewDefaultScrollTheme(),
+}
+
+type MusicPlayerTheme struct {
+	Background rl.Color
+	Default    cui.BoxTextTheme
+	Title      TitleTheme
+	Debug      cui.BoxTextTheme
+
+	Volume          ProgressBarTheme
+	Time            ProgressBarTheme
+	PlayMode        PlayModeBarTheme
+	CurrentSong     CurrentSongBarTheme
+	CurrentSongInfo cui.BoxTextTheme
+
+	FileColors          map[string]FileTypeColor
+	SelectedFileText    rl.Color
+	SelectedFileBg      rl.Color
+	HighlightedFileText rl.Color
+	HighlightedFileBg   rl.Color
+	PlayingText         rl.Color
+	PlayingBg           rl.Color
+
+	ScrollHeader cui.BoxTextTheme
+
+	Scroll cui.ScrollTheme
+}
+type TitleTheme struct {
+	Thickness float32
+	Text      rl.Color
+	Border    rl.Color
+	Bg1       rl.Color
+	Bg2       rl.Color
+}
+type ProgressBarTheme struct {
+	Base   cui.BoxTheme
+	Bar    cui.BoxTheme
+	Text   rl.Color
+	TextBg rl.Color
+}
+type PlayModeBarTheme struct {
+	Base   cui.BoxTheme
+	Text   rl.Color
+	TextBg rl.Color
+}
+type CurrentSongBarTheme struct {
+	Base   cui.BoxTheme
+	Text   rl.Color
+	TextBg rl.Color
+}
+type FileTypeColor struct {
+	Text            rl.Color
+	Bg              rl.Color
+	HighlightedText rl.Color
+	HighlightedBg   rl.Color
+}
 
 type ScreenData struct {
 	HasResized      bool
@@ -153,9 +265,9 @@ var LOG *Logger
 func mainLoop() {
 	rand.Seed(time.Now().UnixNano())
 
-	hotkeyChan := make(chan cui.Action)
+	//hotkeyChan := make(chan cui.Action)
 
-	go ListenHotkeys(hotkeyChan)
+	//go ListenHotkeys(hotkeyChan)
 
 	var p string
 	var noise bool
@@ -304,6 +416,8 @@ func mainLoop() {
 	showFps := false
 	screen := rl.Rectangle{}
 
+	line_height = FONT.LineSpacing + FONT.Size
+
 	cycle := toDuration(170)
 	rumbleSound := NewCyclicalSound(soundData, cycle)
 	for !exit {
@@ -317,11 +431,11 @@ func mainLoop() {
 		}
 
 		globalHotkeyAction := cui.NONE
-		select {
-		case act := <-hotkeyChan:
-			globalHotkeyAction = act
-		default:
-		}
+		// select {
+		// case act := <-hotkeyChan:
+		// 	globalHotkeyAction = act
+		// default:
+		// }
 
 		dt := rl.GetFrameTime()
 		exit = rl.WindowShouldClose()
@@ -335,16 +449,16 @@ func mainLoop() {
 		cui.UpdateInput(input)
 
 		rl.BeginDrawing()
-		rl.ClearBackground(rl.Black)
+		rl.ClearBackground(M_THEME.Background)
 		remainder := screen
 
 		if showFps {
-			DrawDebugInfo(&remainder)
+			DrawDebugInfo(&remainder, M_THEME.Debug)
 		}
 		bounds := remainder
 
-		titleBounds := cui.CutTop(&bounds, FONT.Size+FONT.LineSpacing)
-		DrawTitleShaded(titleBounds, title, rl.Blue, THEME.Text, THEME.Bg)
+		titleBounds := cui.CutTop(&bounds, line_height)
+		DrawTitleShaded(titleBounds, title, M_THEME.Title)
 		DrawCurrentSong(&bounds, PLAYER)
 
 		if len(PLAYER.Playlist) > 0 {
@@ -354,23 +468,23 @@ func mainLoop() {
 				fpath = currentFile.File.Path
 			}
 			width := bounds.Width - (FONT.LineSpacing*4)*4
-			filePath, lines := cui.WrapMonospaceSlow(
-				[]rune(fpath),
+			filePath, lines := cui.WrapMonospaceSlow([]rune(fpath),
 				FONT.CharacterWidth,
 				FONT.Spacing,
 				width)
-			lineHeight := FONT.LineSpacing + FONT.Size
-			fileInfoBounds := cui.CutBottom(&bounds, lineHeight*6)
+
+			fileInfoBounds := cui.CutBottom(&bounds, line_height*6)
 			DrawFileInfo(currentFile, string(filePath), lines, fileInfoBounds)
-			headerBounds := cui.CutTop(&bounds, FONT.Size+FONT.LineSpacing)
-			DrawScrollHeader(headerBounds)
-			cui.DrawScroll(FONT, bounds, &scroll, PLAYER.Playlist, PLAYER.SelectedSongs, rl.Red, THEME, dt,
+			headerBounds := cui.CutTop(&bounds, line_height)
+			DrawScrollHeader(headerBounds, M_THEME.ScrollHeader)
+			cui.DrawScrollEx(FONT, bounds, &scroll, PLAYER.Playlist, PLAYER.SelectedSongs,
+				M_THEME.Scroll, dt,
 				func(itemBounds rl.Rectangle, index int, mFile *MusicFile, selected, highlighted bool) {
 					DrawItem(itemBounds, index, mFile, selected, highlighted)
 				},
 			)
 		} else {
-			cui.DrawBoundedText(FONT, "No files", bounds, cui.TEXT_CENTER, rl.White, rl.Black)
+			cui.DrawBoundedText(FONT, "No files", bounds, cui.TEXT_CENTER, M_THEME.Default.Text, M_THEME.Default.Bg)
 		}
 
 		rl.EndDrawing()
@@ -415,7 +529,7 @@ func UpdateScreenResize(s *ScreenData, width, height float32) {
 		s.PrevFrameScreen.Y = height
 	}
 }
-func DrawDebugInfo(bounds *rl.Rectangle) {
+func DrawDebugInfo(bounds *rl.Rectangle, t cui.BoxTextTheme) {
 	const padding = 10
 	statusBarText := fmt.Sprintf("FPS: %d FrameTime:%.2fms Alloc: %vMiB TotalAlloc: %vMiB Sys: %vMiB NumGC: %v",
 		rl.GetFPS(), rl.GetFrameTime()*1000, cui.Alloc, cui.TotalAlloc, cui.Sys, cui.NumGC)
@@ -424,13 +538,13 @@ func DrawDebugInfo(bounds *rl.Rectangle) {
 		FONT.CharacterWidth, FONT.Spacing, bounds.Width-padding*2,
 	)
 	fpsInfoArea := cui.CutTop(bounds, FONT.Padding*float32(lines))
-	rl.DrawRectangleRec(fpsInfoArea, THEME.Bg)
-	rl.DrawRectangleLinesEx(fpsInfoArea, 1, THEME.Border)
+	rl.DrawRectangleRec(fpsInfoArea, t.Bg)
+	rl.DrawRectangleLinesEx(fpsInfoArea, 1, t.Border)
 	textPos := rl.Vector2{
 		fpsInfoArea.X + padding,
 		fpsInfoArea.Y + (fpsInfoArea.Height-(FONT.Size*float32(lines)))/2,
 	}
-	cui.DrawText(FONT, textPos, string(text), THEME.Text)
+	cui.DrawText(FONT, textPos, string(text), t.Text)
 }
 
 var SHADER rl.Shader
@@ -441,15 +555,15 @@ var COLORLOC int32
 var DIM_SHADER rl.Shader
 var DIM_FACTORLOC int32
 
-func DrawTitleShaded(bounds rl.Rectangle, text string, shader, txtColor, txtBg rl.Color) {
-	rl.DrawRectangleLinesEx(bounds, 1, rl.White)
+func DrawTitleShaded(bounds rl.Rectangle, text string, t TitleTheme) {
+	rl.DrawRectangleLinesEx(bounds, 1, t.Border)
 	rl.BeginShaderMode(SHADER)
-	rl.DrawRectangleRec(cui.Pad(bounds, 1), shader)
+	rl.DrawRectangleRec(cui.Pad(bounds, 1), t.Bg2)
 	rl.SetShaderValue(SHADER, RESOLUTIONLOC, []float32{bounds.Width * 50, bounds.Height * 50}, rl.ShaderUniformVec2)
 	rl.SetShaderValue(SHADER, TIMELOC, []float32{float32(rl.GetTime())}, rl.ShaderUniformFloat)
-	rl.SetShaderValue(SHADER, COLORLOC, []float32{float32(shader.R) / 255, float32(shader.G) / 255, float32(shader.B) / 255}, rl.ShaderUniformVec3)
+	rl.SetShaderValue(SHADER, COLORLOC, []float32{float32(t.Bg2.R) / 255, float32(t.Bg2.G) / 255, float32(t.Bg2.B) / 255}, rl.ShaderUniformVec3)
 	rl.EndShaderMode()
-	cui.DrawBoundedText(FONT, text, bounds, cui.TEXT_CENTER, txtColor, txtBg)
+	cui.DrawBoundedText(FONT, text, bounds, cui.TEXT_CENTER, t.Text, t.Bg1)
 }
 
 type HeaderCol struct {
@@ -458,8 +572,7 @@ type HeaderCol struct {
 	SizePercent float32
 }
 
-func DrawScrollHeader(bounds rl.Rectangle) {
-	t := cui.BoxTheme{1, rl.White, rl.White, rl.Gray}
+func DrawScrollHeader(bounds rl.Rectangle, t cui.BoxTextTheme) {
 	width := bounds.Width - 8 //fixme: this is the scroll width
 	for i, col := range PLAYER.HeaderCols {
 		colWidth := width * col.SizePercent
@@ -467,7 +580,7 @@ func DrawScrollHeader(bounds rl.Rectangle) {
 			colWidth = bounds.Width
 		}
 		colBounds := cui.CutLeft(&bounds, colWidth)
-		cui.DrawBoxEx(colBounds, t)
+		cui.DrawBoxEx2(colBounds, t)
 		cui.BeginScissorMode(colBounds)
 		cui.DrawBoundedText(FONT, col.Name, colBounds, cui.TEXT_LEFT, t.Text, t.Bg)
 		rl.EndScissorMode()
@@ -489,25 +602,24 @@ func DrawItem(bounds rl.Rectangle, index int, mFile *MusicFile, selected, highli
 	}
 	width := bounds.Width
 	cui.BeginScissorMode(bounds)
-	rl.DrawRectangleRec(bounds, rl.Red)
 	for i, col := range PLAYER.HeaderCols {
 		colWidth := width * col.SizePercent
 		if i == len(PLAYER.HeaderCols)-1 {
 			colWidth = bounds.Width
 		}
 		colBounds := cui.CutLeft(&bounds, colWidth)
-		color := t.Bg
-		tColor := t.Text
+		bg := t.Bg
+		text := t.Text
 		if i == 0 {
 			if isPlaying {
-				color = rl.Red
-				tColor = rl.White
+				bg = M_THEME.PlayingBg
+				text = M_THEME.PlayingText
 			}
 		}
-		cui.DrawBox(colBounds, t.Thickness, color, t.Border)
+		cui.DrawBox(colBounds, t.Thickness, bg, t.Border)
 		colBounds.Width -= FONT.Spacing * 4
 		cui.BeginScissorMode(colBounds)
-		cui.DrawBoundedText(FONT, cols[i], colBounds, cui.TEXT_LEFT, tColor, color)
+		cui.DrawBoundedText(FONT, cols[i], colBounds, cui.TEXT_LEFT, text, bg)
 		rl.EndScissorMode()
 	}
 	rl.EndScissorMode()
@@ -522,42 +634,48 @@ func DrawCurrentSong(bounds *rl.Rectangle, player MusicPlayer) {
 	timeBounds := cui.CutLeft(&volumeAndTimeBounds, width)
 	volumeBounds := cui.CutLeft(&volumeAndTimeBounds, width)
 	modeBounds := volumeAndTimeBounds
-	cui.DrawBoxEx(volumeBounds, cui.BoxTheme{1, rl.White, rl.White, rl.Black})
-	volume := volumeBounds
-	volume.Width *= player.Volume
-	cui.DrawBoxEx(volumeBounds, cui.BoxTheme{1, rl.White, rl.White, rl.Black})
-	cui.DrawBoxEx(volume, cui.BoxTheme{1, rl.White, rl.White, rl.DarkGreen})
-	cui.DrawBoundedText(FONT, "VOLUME", volumeBounds, cui.TEXT_CENTER, rl.White, rl.Black)
 
-	percent := player.TimePlayed / player.TimeLength
-	elapsed := timeBounds
-	elapsed.Width *= percent
-	cui.DrawBoxEx(timeBounds, cui.BoxTheme{1, rl.White, rl.White, rl.Black})
-	cui.DrawBoxEx(elapsed, cui.BoxTheme{1, rl.White, rl.White, cui.DarkYellow})
-	elapsedText := "no song"
-	if player.State == PLAYING {
-		timePlayed := FormatDuration(player.TimePlayed)
-		elapsedText = fmt.Sprintf("%s/%s", timePlayed, player.CurrentMusic.DurationStr)
+	{ //volume
+		volume := volumeBounds
+		volume.Width *= player.Volume
+		cui.DrawBoxEx(volumeBounds, M_THEME.Volume.Base)
+		cui.DrawBoxEx(volume, M_THEME.Volume.Bar)
+		cui.DrawBoundedText(FONT, "VOLUME", volumeBounds, cui.TEXT_CENTER, M_THEME.Volume.Text, M_THEME.Volume.TextBg)
 	}
-	cui.DrawBoundedText(FONT, elapsedText, timeBounds, cui.TEXT_CENTER, rl.White, rl.Black)
 
-	cui.DrawBoxEx(modeBounds, cui.BoxTheme{1, rl.White, rl.White, rl.Black})
-	text := "NORMAL"
-	switch player.PlayOrder {
-	case PLAYORDER_NORMAL:
-		text = "NORMAL"
-	case PLAYORDER_RANDOM:
-		text = "RANDOM"
-	case PLAYORDER_RANDOM_NO_REPEAT:
-		text = "RANDOM_NO_REPEAT"
+	{ //time
+		percent := player.TimePlayed / player.TimeLength
+		elapsed := timeBounds
+		elapsed.Width *= percent
+		cui.DrawBoxEx(timeBounds, M_THEME.Time.Base)
+		cui.DrawBoxEx(elapsed, M_THEME.Time.Bar)
+		elapsedText := "no song"
+		if player.State == PLAYING {
+			timePlayed := FormatDuration(player.TimePlayed)
+			elapsedText = fmt.Sprintf("%s/%s", timePlayed, player.CurrentMusic.DurationStr)
+		}
+		cui.DrawBoundedText(FONT, elapsedText, timeBounds, cui.TEXT_CENTER, M_THEME.Time.Text, M_THEME.Time.TextBg)
 	}
-	cui.DrawBoundedText(FONT, text, modeBounds, cui.TEXT_CENTER, rl.White, rl.Black)
+
+	{ //mode
+		cui.DrawBoxEx(modeBounds, M_THEME.PlayMode.Base)
+		text := "NORMAL"
+		switch player.PlayOrder {
+		case PLAYORDER_NORMAL:
+			text = "NORMAL"
+		case PLAYORDER_RANDOM:
+			text = "RANDOM"
+		case PLAYORDER_RANDOM_NO_REPEAT:
+			text = "RANDOM_NO_REPEAT"
+		}
+		cui.DrawBoundedText(FONT, text, modeBounds, cui.TEXT_CENTER, M_THEME.PlayMode.Text, M_THEME.PlayMode.TextBg)
+	}
 
 	if player.RaylibMusic != nil {
 		songBounds := cui.CutTop(bounds, FONT.Size+FONT.LineSpacing)
-		cui.DrawBoxEx(songBounds, cui.BoxTheme{1, rl.White, rl.White, rl.Black})
+		cui.DrawBoxEx(songBounds, M_THEME.CurrentSong.Base)
 		text2 := fmt.Sprintf("%s - %s", player.CurrentMusic.Artist, player.CurrentMusic.Title)
-		cui.DrawBoundedText(FONT, text2, songBounds, cui.TEXT_LEFT, rl.White, rl.Black)
+		cui.DrawBoundedText(FONT, text2, songBounds, cui.TEXT_LEFT, M_THEME.CurrentSong.Text, M_THEME.CurrentSong.TextBg)
 	}
 
 }
@@ -566,18 +684,21 @@ func DrawFileInfo(file *MusicFile, wrappedFilepath string, wrappedLines int, bou
 	if file == nil {
 		return
 	}
+	artist := fmt.Sprintf("Artist: %s", file.Artist)
+	album := fmt.Sprintf("Album: %s", file.Album)
+	title := fmt.Sprintf("Title: %s", file.Title)
+
 	cui.BeginScissorMode(bounds)
-	lineHeight := FONT.LineSpacing + FONT.Size
-	fileInfoBoundsPadded := cui.PadEx(bounds, FONT.WhiteSpaceWidth*2, FONT.Size/2)
+	fileInfoBoundsPadded := cui.PadEx(bounds, FONT.Em(1), FONT.Em(1))
 	pos := rl.Vector2{fileInfoBoundsPadded.X, fileInfoBoundsPadded.Y}
-	cui.DrawBox(bounds, 1, rl.Black, rl.White)
-	cui.DrawText(FONT, pos, wrappedFilepath, rl.White)
-	pos.Y += lineHeight * float32(wrappedLines)
-	cui.DrawText(FONT, pos, fmt.Sprintf("Artist: %s", file.Artist), rl.White)
-	pos.Y += lineHeight
-	cui.DrawText(FONT, pos, fmt.Sprintf("Album: %s", file.Album), rl.White)
-	pos.Y += lineHeight
-	cui.DrawText(FONT, pos, fmt.Sprintf("Title: %s", file.Title), rl.White)
+	cui.DrawBoxEx2(bounds, M_THEME.CurrentSongInfo)
+	cui.DrawText(FONT, pos, wrappedFilepath, M_THEME.CurrentSongInfo.Text)
+	pos.Y += line_height * float32(wrappedLines)
+	cui.DrawText(FONT, pos, artist, M_THEME.CurrentSongInfo.Text)
+	pos.Y += line_height
+	cui.DrawText(FONT, pos, album, M_THEME.CurrentSongInfo.Text)
+	pos.Y += line_height
+	cui.DrawText(FONT, pos, title, M_THEME.CurrentSongInfo.Text)
 	rl.EndScissorMode()
 }
 
@@ -720,6 +841,9 @@ func Pop[T any](arr *[]T) T {
 
 func PlaySong(player *MusicPlayer, scroll *cui.Scroll[*MusicFile]) error {
 	song := cui.GetHighlightedScrollItem(*scroll, player.Playlist)
+	if song == nil {
+		return fmt.Errorf("invalid song")
+	}
 	err := playSongAt(player, song.Index)
 	if err != nil {
 		return err
@@ -1022,51 +1146,36 @@ const (
 	HIDDEN_FOLDER
 )
 
-func DecideFileColor(selected, highlighted bool, mFile *MusicFile) cui.BoxTheme {
-	t := cui.BoxTheme{}
+func DecideFileColor(selected, highlighted bool, mFile *MusicFile) cui.BoxTextTheme {
+	t := cui.BoxTextTheme{}
 	file := mFile.File
-	text1, text2, background := FileTypeColors(file.Ext)
+	fileColors := FileTypeColors(file.Ext)
 	if highlighted {
 		if selected {
-			t.Text = rl.Black
-			t.Bg = rl.Gold
+			t.Text = M_THEME.HighlightedFileText
+			t.Bg = M_THEME.HighlightedFileBg
 		} else {
-			t.Text = text2
-			t.Bg = text1
+			t.Text = fileColors.HighlightedText
+			t.Bg = fileColors.HighlightedBg
 		}
 	} else {
 		if selected {
-			t.Text = rl.Black
-			t.Bg = rl.Yellow
+			t.Text = M_THEME.SelectedFileText
+			t.Bg = M_THEME.SelectedFileBg
 		} else {
-			t.Text = text1
-			t.Bg = background
+			t.Text = fileColors.Text
+			t.Bg = fileColors.Bg
 		}
 	}
 	return t
 }
 
-func FileTypeColors(ext string) (text1, text2, background rl.Color) {
-	switch ext {
-	case ".mp3":
-		return rl.White, rl.Black, rl.Black
-	case ".wav":
-		return rl.DarkBlue, rl.Black, rl.Black
-	case ".flac":
-		return rl.Purple, rl.White, rl.Black
-	case ".vgz":
-		return rl.DarkGreen, rl.White, rl.Black
-	case ".ogg":
-		return cui.DarkRed, rl.White, rl.Black
-	case ".webm":
-		return rl.DarkGray, rl.White, rl.Black
-	case ".mp4":
-		return rl.Brown, rl.White, rl.Black
-	case ".spc":
-		return rl.Beige, rl.White, rl.Black
-	default:
-		return rl.White, rl.Black, rl.Black
+func FileTypeColors(ext string) FileTypeColor {
+	val, ok := M_THEME.FileColors[ext]
+	if !ok {
+		return M_THEME.FileColors[".mp3"]
 	}
+	return val
 }
 
 func isMusicExtension(ext string) bool {
