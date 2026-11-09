@@ -309,6 +309,29 @@ func mainLoop() {
 	rl.SetExitKey(rl.KeyNull)
 	rl.InitAudioDevice()
 
+	SHADER = rl.LoadShader("shaders/shader.vs", "shaders/shader.fs")
+	RESOLUTIONLOC = rl.GetShaderLocation(SHADER, "resolution")
+	TIMELOC = rl.GetShaderLocation(SHADER, "time")
+	COLORLOC = rl.GetShaderLocation(SHADER, "uColor")
+
+	DIM_SHADER = rl.LoadShader("shaders/dim_shader.vs", "shaders/dim_shader.fs")
+	DIM_FACTORLOC = rl.GetShaderLocation(DIM_SHADER, "dimFactor")
+	//fontPath := "roboto.ttf"
+	fontPath, err := cui.GetSystemFont()
+	if err != nil {
+		LOG.Warn("couldn't load system font: %s", err)
+	}
+	const font_size = 20
+	const codepointSize = 20000
+	FONT = cui.NewFont(fontPath, font_size, codepointSize)
+	FONT.IsMonospace = true
+	defer rl.UnloadFont(FONT.Font)
+
+	scroll := cui.Scroll[*MusicFile]{
+		ItemHeight: FONT.Size,
+		FilterSLE:  cui.NewSingleLineEditor(),
+	}
+
 	if state == nil {
 		LOG.Info("couldn't find saved state, using default values")
 		PLAYER = MusicPlayer{
@@ -372,6 +395,10 @@ func mainLoop() {
 			}
 		}
 		PLAYER.CurrentMusic = currentMusic
+		//if len(PLAYER.HeaderCols) == 0 {
+		PLAYER.HeaderCols = headerCols
+		//}
+		PLAYER.Playlist = musicfiles
 		if PLAYER.CurrentMusic != nil {
 			mus := rl.LoadMusicStream(PLAYER.CurrentMusic.File.Path)
 			PLAYER.RaylibMusic = &mus
@@ -380,34 +407,12 @@ func mainLoop() {
 			rl.SetMusicVolume(*PLAYER.RaylibMusic, PLAYER.Volume)
 			rl.PauseMusicStream(*PLAYER.RaylibMusic)
 			PLAYER.State = PAUSED
+			for i, v := range PLAYER.Playlist {
+				if v.File.Path == PLAYER.CurrentMusic.File.Path {
+					scroll.Cursor = i
+				}
+			}
 		}
-		//if len(PLAYER.HeaderCols) == 0 {
-		PLAYER.HeaderCols = headerCols
-		//}
-		PLAYER.Playlist = musicfiles
-	}
-
-	SHADER = rl.LoadShader("shaders/shader.vs", "shaders/shader.fs")
-	RESOLUTIONLOC = rl.GetShaderLocation(SHADER, "resolution")
-	TIMELOC = rl.GetShaderLocation(SHADER, "time")
-	COLORLOC = rl.GetShaderLocation(SHADER, "uColor")
-
-	DIM_SHADER = rl.LoadShader("shaders/dim_shader.vs", "shaders/dim_shader.fs")
-	DIM_FACTORLOC = rl.GetShaderLocation(DIM_SHADER, "dimFactor")
-	//fontPath := "roboto.ttf"
-	fontPath, err := cui.GetSystemFont()
-	if err != nil {
-		LOG.Warn("couldn't load system font: %s", err)
-	}
-	const font_size = 20
-	const codepointSize = 20000
-	FONT = cui.NewFont(fontPath, font_size, codepointSize)
-	FONT.IsMonospace = true
-	defer rl.UnloadFont(FONT.Font)
-
-	scroll := cui.Scroll[*MusicFile]{
-		ItemHeight: FONT.Size,
-		FilterSLE:  cui.NewSingleLineEditor(),
 	}
 
 	playlistTitle := fmt.Sprintf("%s", PLAYER.PlaylistPath)
@@ -423,6 +428,7 @@ func mainLoop() {
 
 	cycle := toDuration(170)
 	rumbleSound := NewCyclicalSound(soundData, cycle)
+	firstFrame := true
 	for !exit {
 		if noise {
 			UpdateCycle(rumbleSound)
@@ -501,6 +507,10 @@ func mainLoop() {
 		err = Input(action, &scroll)
 		if err != nil {
 			LOG.Warn("%v", err.Error())
+		}
+		if firstFrame { //bigass hack
+			firstFrame = false
+			cui.CenterCursor(&scroll)
 		}
 	}
 	if PLAYER.RaylibMusic != nil {

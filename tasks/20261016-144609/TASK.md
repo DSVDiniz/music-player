@@ -1,6 +1,6 @@
 # A hotkey to center into the currently playing song
 
-- STATUS: OPEN
+- STATUS: CLOSED
 - PRIORITY: 100
 - TAGS: feature
 
