@@ -371,11 +371,14 @@ func mainLoop() {
 				}
 			}
 		}
-		//fixme: resuming songs after shutdown is not working
 		PLAYER.CurrentMusic = currentMusic
 		if PLAYER.CurrentMusic != nil {
 			mus := rl.LoadMusicStream(PLAYER.CurrentMusic.File.Path)
 			PLAYER.RaylibMusic = &mus
+			//I need to do this song and dance, otherwise song isn't really loaded and paused
+			rl.PlayMusicStream(*PLAYER.RaylibMusic)
+			rl.SetMusicVolume(*PLAYER.RaylibMusic, PLAYER.Volume)
+			rl.PauseMusicStream(*PLAYER.RaylibMusic)
 			PLAYER.State = PAUSED
 		}
 		//if len(PLAYER.HeaderCols) == 0 {
