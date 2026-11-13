@@ -1,4 +1,14 @@
-# TODO
+# music player (name pending)
+This is a music player, it is currently unfinished.
+
+Right now it's supposed to be simple, quick and to use little memory.
+
+In the future, it will become a much more complex project, where users will be able to connect to other people and share music tastes and libraries.
+
+It will also try to support a large amount of sound formats.
+
+# TODO (first milestone)
+
 - [x] music list
 - [x] play music
 - [x] pause music
@@ -53,7 +63,7 @@
     - [ ] show a notification of what happened
 - [x] refresh music list with F5
 - [ ] scroll header should be modifiable
-- [ ] play sound every X minutes feature (only if no music is playing)
+- [x] play sound every X minutes feature (only if no music is playing)
 
 # Bugs
 - [ ] when rewinding song until start, NextSong() is called on Update() for some reason 
