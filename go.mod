@@ -2,13 +2,10 @@ module music-player
 
 go 1.27
 
-replace github.com/dsvdiniz/cutterui => ../cutterui
-
 require (
 	github.com/BurntSushi/xgb v0.0.0-20210121224620-deaf085860bc
 	github.com/abema/go-mp4 v1.5.0
 	github.com/dhowden/tag v0.0.0-20240417053706-3d75831295e8
-	github.com/dsvdiniz/cutterui v0.0.0-00010101000000-000000000000
 	github.com/gen2brain/raylib-go/raylib v0.55.1
 	github.com/jfreymuth/oggvorbis v1.0.5
 	github.com/mewkiz/flac v1.0.13
